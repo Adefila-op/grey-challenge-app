@@ -646,6 +646,16 @@ function curLevel(tk){var p=S.progress[tk];for(var i=0;i<p.length;i++){if(p[i]<5
 function viewLevel(tk){var v=S.viewLvl[tk];return v==null?curLevel(tk):v;}
 function getProg(tk){return S.progress[tk][viewLevel(tk)];}
 function setProgress(tk,n){var l=viewLevel(tk);if(l<=curLevel(tk)&&S.progress[tk][l]<n)S.progress[tk][l]=n;}
+function lessonSummary(tk,lv){
+  var deck=deckFor(tk,lv),total=0,correct=0,failed=0;
+  deck.slides.forEach(function(sl){
+    if(sl.kind!=="check")return;
+    total++;
+    if(S.checks[sl.key]){correct++;}
+    else if(S.wrong[sl.key]!=null){failed++;}
+  });
+  return {total:total,correct:correct,failed:failed,percent:total?Math.round((correct/total)*100):0};
+}
 
 /* One lesson per concept: explanation, example, common mistake, exercise, quick check. */
 function C(e,x,m,t,q,o,a,w,code){return {e:e,x:x,m:m,t:t,q:q,o:o,a:a,w:w,code:!!code};}
@@ -1202,7 +1212,7 @@ function slideHtml(d,sl){
         var cls=ok&&i===q.a?" right":(!ok&&wrong===i?" wrong":"");
         return '<button class="opt'+cls+'" type="button" data-action="pick" data-id="'+sl.key+'|'+i+'"'+(ok?" disabled":"")+'>'+esc(o)+'</button>';
       }).join("")+'</div>'+
-      (ok?'<p class="fb good"><b>Correct.</b> '+esc(q.w)+'</p>':(wrong!=null?'<p class="fb bad"><b>Not quite.</b> Look at the lesson again and try another answer.</p>':'<p class="muted">Choose an answer to continue.</p>'))+'</div>';
+      (ok?'<p class="fb good"><b>Correct.</b> '+esc(q.w)+'</p>':(wrong!=null?'<p class="fb bad"><b>Incorrect.</b> This question is marked as failed. Read the lesson again, then retry this lesson at the end to improve your score.</p>':'<p class="muted">Choose an answer to continue.</p>'))+'</div>';
   }
   if(k==="idea"){
     body='<div class="s-two"><div class="s-state">'+esc(sl.statement)+'</div><div class="s-box"><b>Think of it like this</b>'+esc(sl.analogy)+'</div></div>';
@@ -1223,7 +1233,11 @@ function levelLabel(id){return LEVEL_NAMES[viewLevel(id)]+" · "+TRACKS[id].name
 function vWatch(id){
   var d=deckFor(id,viewLevel(id)),n=d.slides.length,i=Math.max(0,Math.min(S.slide,n-1));
   var cur=d.slides[i],hold=cur.kind==="check"&&!S.checks[cur.key]?" disabled":"";
-  return panelHead("Lessons · "+levelLabel(id))+
+  var sum=lessonSummary(id,viewLevel(id));
+  var retryCard = (i===n-1 && sum.total && sum.failed>0)
+    ? '<section class="card" style="margin-bottom:12px;border-color:rgba(255,164,82,0.5);background:rgba(255,164,82,0.08)"><div class="row between" style="gap:12px;align-items:center"><div><span class="pill sun">Lesson score</span><h3 style="margin:8px 0 4px">'+sum.correct+' / '+sum.total+' correct</h3><p class="muted" style="margin:0">You scored '+sum.percent+'%. Some answers were marked as failed, so retry this lesson to improve the result.</p></div><button class="btn small" type="button" data-action="retry-lesson">Retry lesson</button></div></section>'
+    : '';
+  return panelHead("Lessons · "+levelLabel(id))+retryCard+
     '<section class="card" style="padding:12px">'+slideHtml(d,d.slides[i])+
     '<div class="row between" style="margin-top:12px;flex-wrap:nowrap"><button class="btn soft small" type="button" data-action="slide-prev"'+(i===0?" disabled":"")+'>Back</button>'+
     '<span class="muted num" style="font-weight:700">'+(i+1)+' / '+n+'</span>'+
@@ -1656,6 +1670,14 @@ document.addEventListener("click",function(e){
   else if(a==="close-mode"){S.mode=null;}
   else if(a==="slide-prev"){if(S.slide>0)S.slide--;}
   else if(a==="slide-next"){S.slide++;}
+  else if(a==="retry-lesson"){
+    var retryTarget = S.learnTrack || tk;
+    var retryLv = viewLevel(retryTarget);
+    var retryDeck = deckFor(retryTarget, retryLv);
+    retryDeck.slides.forEach(function(sl){if(sl.kind==="check"){delete S.checks[sl.key];delete S.wrong[sl.key];}});
+    S.slide=0;
+    S.mode="watch";
+  }
   else if(a==="finish-watch"){setProgress(tk,1);S.mode=null;}
   else if(a==="pick"){
     var pk=id.split("|"),kk=pk[0].split(":"),cc=LESSONS[kk[0]][Number(kk[1])][Number(kk[2])];
