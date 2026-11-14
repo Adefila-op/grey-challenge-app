@@ -2,8 +2,8 @@ import { useEffect, useRef } from "react";
 import { BackHandler, Platform, StatusBar, View } from "react-native";
 import { WebView } from "react-native-webview";
 
-// Put your Vercel address here before you build.
-const APP_URL = "https://YOUR-PROJECT.vercel.app";
+// Live web app URL used by the Android wrapper.
+const APP_URL = "https://greystudent.vercel.app";
 
 export default function App() {
   const web = useRef(null);
