@@ -556,6 +556,10 @@ var ADMIN_PIN="2580";
 
 var LEVEL_NAMES=["Beginner","Intermediate","Advanced","Professional"];
 
+function makeEmptyProgress(){
+  return {prompt:[0,0,0,0],coding:[0,0,0,0],ai:[0,0,0,0],robotics:[0,0,0,0]};
+}
+
 function getStoredApiKey(){
   if(APP_SETTINGS && APP_SETTINGS.apiKey) return APP_SETTINGS.apiKey;
   try{ return JSON.parse(localStorage.getItem(ADMIN_DATA_KEY)||"null") && JSON.parse(localStorage.getItem(ADMIN_DATA_KEY)||"null").apiKey || ""; }catch(e){ return ""; }
@@ -1026,6 +1030,14 @@ function applySignedInUser(details){
   var track = TRACKS[details && details.track] ? details.track : "prompt";
   S.me = {name:name,school:school,track:track,team:null};
   S.learnTrack = track;
+  S.progress = makeEmptyProgress();
+  S.viewLvl = {};
+  S.checks = {};
+  S.wrong = {};
+  S.voted = [];
+  S.requested = [];
+  S.open = [];
+  S.tutor = {};
   S.joined = true;
   S.view = "home";
   setAuthMessage("Signed in successfully.","success");
@@ -1052,6 +1064,9 @@ function resolveLocalDemoAuth(email,password){
     school: match.school || "independent",
     track: TRACKS[match.track] ? match.track : "prompt"
   } : null;
+}
+function isRateLimitError(msg){
+  return /rate[_ -]?limit|too many requests|429|request limit|temporarily.*blocked/i.test(String(msg || ""));
 }
 function toggleAuthForms(showSignin){
   var signupForm=document.getElementById("signup-form");
@@ -1109,9 +1124,9 @@ function tutor(key){
 }
 
 var S={
-  me:{name:"Tolu A.",school:"uni",track:"robotics",team:"t1"},
-  view:"signup",learnTrack:"robotics",filter:"all",
-  progress:{prompt:[2,0,0,0],coding:[1,0,0,0],ai:[0,0,0,0],robotics:[3,0,0,0]},viewLvl:{},
+  me:{name:"Student",school:"independent",track:"prompt",team:null},
+  view:"signup",learnTrack:"prompt",filter:"all",
+  progress:makeEmptyProgress(),viewLvl:{},
   voted:[],requested:[],open:[],
   mode:null,slide:0,admin:false,adminTab:"answers",busy:{},aiMsg:"",pinError:false,checks:{},wrong:{},tutor:{},joined:false,
   supabaseSession:null
@@ -1782,7 +1797,10 @@ document.addEventListener("submit",async function(e){
         applySignedInUser(demoSession);
         return;
       }
-      if(!supabase || !hasRealSupabaseConfig()){throw new Error("Supabase is not configured yet. Add your real project URL and anon key in web/supabase-config.js.");}
+      if(!supabase || !hasRealSupabaseConfig()){
+        setAuthMessage("Supabase is not configured yet. Use the demo account demo@grey.local / grey123 or add your real project keys.","error");
+        return;
+      }
       var signIn = await supabase.auth.signInWithPassword({ email: signinEmail, password: signinPassword });
       if(signIn.error){throw signIn.error;}
       var session = signIn.data && signIn.data.session;
@@ -1794,6 +1812,14 @@ document.addEventListener("submit",async function(e){
         track: userMeta.track || "prompt",
         team: null
       };
+      S.progress = makeEmptyProgress();
+      S.viewLvl = {};
+      S.checks = {};
+      S.wrong = {};
+      S.voted = [];
+      S.requested = [];
+      S.open = [];
+      S.tutor = {};
       S.joined = true;
       S.learnTrack = S.me.track;
       S.view = "home";
@@ -1808,7 +1834,9 @@ document.addEventListener("submit",async function(e){
         return;
       }
       var msg = err && err.message ? err.message : "Could not sign in to Supabase.";
-      if(/email.*confirm|confirm.*email/i.test(msg)){
+      if(isRateLimitError(msg)){
+        msg = "Too many sign-in attempts. Please try again in a minute, or use the demo account demo@grey.local / grey123 to continue immediately.";
+      } else if(/email.*confirm|confirm.*email/i.test(msg)){
         msg = "Check your email and confirm the sign-up before logging in, or disable email verification in Supabase Authentication settings.";
       }
       setAuthMessage(msg,"error");
@@ -1827,19 +1855,35 @@ document.addEventListener("submit",async function(e){
     try{
       if(supabase && hasRealSupabaseConfig()){
         setAuthMessage("Creating your Supabase account…","info");
-        var signup = await supabase.auth.signUp({
-          email: email,
-          password: password,
-          options: { data: { full_name: name, school: schoolId, track: t0, independent: isIndependent ? true : false } }
-        });
-        if(signup.error){throw signup.error;}
-        var session = signup.data && signup.data.session;
-        if(!session){
-          var signin = await supabase.auth.signInWithPassword({ email: email, password: password });
-          if(signin.error){throw signin.error;}
-          session = signin.data && signin.data.session;
+        try{
+          var signup = await supabase.auth.signUp({
+            email: email,
+            password: password,
+            options: { data: { full_name: name, school: schoolId, track: t0, independent: isIndependent ? true : false } }
+          });
+          if(signup.error){throw signup.error;}
+          var session = signup.data && signup.data.session;
+          if(!session){
+            var signin = await supabase.auth.signInWithPassword({ email: email, password: password });
+            if(signin.error){throw signin.error;}
+            session = signin.data && signin.data.session;
+          }
+          S.supabaseSession=session;
+        }catch(supabaseErr){
+          if(isRateLimitError(supabaseErr && supabaseErr.message)){
+            var demoUsers = getDemoUsers();
+            var existingUser = demoUsers.find(function(u){return String(u.email || "").toLowerCase() === String(email).trim().toLowerCase();});
+            if(existingUser && String(existingUser.password || "") !== String(password)){
+              throw new Error("An account with that email already exists. Use a different email or sign in with the correct password.");
+            }
+            if(!existingUser){
+              demoUsers.unshift({email:String(email).trim().toLowerCase(),password:String(password),full_name:name,school:schoolId,track:t0,independent:isIndependent});
+              saveDemoUsers(demoUsers);
+            }
+          } else {
+            throw supabaseErr;
+          }
         }
-        S.supabaseSession=session;
       }else{
         var demoUsers = getDemoUsers();
         var existingUser = demoUsers.find(function(u){return String(u.email || "").toLowerCase() === String(email).trim().toLowerCase();});
@@ -1855,7 +1899,7 @@ document.addEventListener("submit",async function(e){
       ANSWERS.forEach(function(a){a.mine=false;});
       S.me={name:name,school:schoolId,track:t0,team:null};
       S.voted=[];S.requested=[];S.learnTrack=t0;S.mode=null;S.checks={};S.wrong={};S.tutor={};S.joined=true;
-      S.progress={prompt:[0,0,0,0],coding:[0,0,0,0],ai:[0,0,0,0],robotics:[0,0,0,0]};S.viewLvl={};
+      S.progress=makeEmptyProgress();S.viewLvl={};
       if(isIndependent){
         REGISTERED_STUDENTS.unshift({id:"stu-"+Date.now(),name:name,email:email,school:"independent",track:t0,type:"independent",createdAt:new Date().toISOString()});
       }
@@ -1864,7 +1908,9 @@ document.addEventListener("submit",async function(e){
       if(location.hash==="#home"){route();}else{location.hash="home";}
     }catch(err){
       var msg = err && err.message ? err.message : "Could not sign in to Supabase.";
-      if(/email.*confirm|confirm.*email/i.test(msg)){
+      if(isRateLimitError(msg)){
+        msg = "Sign-up is temporarily rate limited by Supabase. Please wait a minute, or continue with the demo account demo@grey.local / grey123.";
+      } else if(/email.*confirm|confirm.*email/i.test(msg)){
         msg = "Account created. Please confirm your email in Supabase Auth, or turn off email confirmation for instant sign-up.";
       }
       setAuthMessage(msg,"error");
