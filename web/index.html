@@ -344,10 +344,16 @@ ol.s-list li::before{content:counter(n);flex:none;width:30px;height:30px;border-
   <section class="auth-form">
     <div class="auth-card">
       <h2>Create your account</h2>
-      <p class="muted">It takes one minute. No email or password.</p>
+      <p class="muted">Use a real email and password to connect your app to Supabase.</p>
       <form id="signup-form">
         <label class="field" for="su-name">Full name
           <input id="su-name" maxlength="28" required autocomplete="off" placeholder="e.g. Tolu Adeyemi">
+        </label>
+        <label class="field" for="su-email">Email address
+          <input id="su-email" type="email" required autocomplete="email" placeholder="you@example.com">
+        </label>
+        <label class="field" for="su-password">Password
+          <input id="su-password" type="password" required autocomplete="new-password" minlength="6" placeholder="Minimum 6 characters">
         </label>
         <label class="field" for="su-school">Your school
           <select id="su-school"></select>
@@ -355,12 +361,16 @@ ol.s-list li::before{content:counter(n);flex:none;width:30px;height:30px;border-
         <label class="field" for="su-code">School code <small>Given to you during our school visit</small>
           <input id="su-code" maxlength="10" autocomplete="off" placeholder="e.g. UNI-204">
         </label>
+        <label class="check" for="su-independent">
+          <input id="su-independent" type="checkbox">
+          I am an independent student
+        </label>
         <div class="field" role="group" aria-labelledby="su-track-label"><span id="su-track-label">Pick your track</span>
           <div class="track-pick" id="su-tracks"></div>
         </div>
         <button class="btn wide" type="submit">Create my account</button>
-        <a class="link" href="#home" style="text-align:center">Look around first</a>
-        <a class="link" href="#admin" style="text-align:center;color:var(--muted)">Admin sign in</a>
+        <div id="auth-message" class="notice" style="display:none"></div>
+        <button class="btn soft wide" type="button" data-action="show-signin">Sign in</button>
       </form>
     </div>
   </section>
@@ -381,19 +391,26 @@ ol.s-list li::before{content:counter(n);flex:none;width:30px;height:30px;border-
     <div class="topbar">
       <a class="logo" href="#home" aria-label="GREY home">GR<i class="e" aria-hidden="true"><b></b><b></b><b></b></i>Y</a>
       <div class="who">
-        <div class="who-text"><b id="me-name"></b><span class="muted" id="me-school"></span> · <a href="#signup">Sign out</a></div>
+        <div class="who-text"><b id="me-name"></b><span class="muted" id="me-school"></span> · <button class="link" type="button" data-action="sign-out" style="background:none;border:none;padding:0;font:inherit;cursor:pointer;">Sign out</button></div>
         <div class="avatar" id="me-avatar" aria-hidden="true"></div>
       </div>
     </div>
     <main id="view"></main>
-    <p class="note">Prototype with sample schools, teams and scores. Your own progress is saved on this device only.</p>
+    <p class="note">Prototype with sample schools, teams and scores. Supabase keeps the personal session and uploaded state when it is connected; otherwise the app still saves locally.</p>
   </div>
   <nav class="tabs" id="tab-nav" aria-label="Sections"></nav>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (function(){
 "use strict";
+
+var SUPABASE_URL = "https://nvqbucngwaalfezdncsx.supabase.co";
+var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im52cWJ1Y25nd2FhbGZlemRuY3N4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ2NDQ3ODcsImV4cCI6MjExMDIyMDc4N30.DC7H7W1ODVyCV_CQ7Pfn0bsmLkEJmYErIZc2HnpS5w4";
+var supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+}) : null;
 
 var ICON = {
   prompt:'<svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-5 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/><path d="M8 10h8M8 13h5"/></svg>',
@@ -424,7 +441,19 @@ var SCHOOLS=[
   {id:"bfa",name:"Bright Future Academy",code:"BFA-031",students:960},
   {id:"nor",name:"Northgate Comprehensive",code:"NOR-240",students:1275},
   {id:"har",name:"Harmony Girls' School",code:"HAR-066",students:1090},
-  {id:"pio",name:"Pioneer Science School",code:"PIO-193",students:1225}
+  {id:"pio",name:"Pioneer Science School",code:"PIO-193",students:1225},
+  {id:"independent",name:"Independent student",code:"IND-000",students:0}
+];
+var ADMIN_DATA_KEY="grey-challenge-admin-v1";
+var APP_SETTINGS={apiKey:""};
+var REGISTERED_STUDENTS=[
+  {id:"stu-1",name:"Ada K.",email:"ada@example.com",school:"nor",track:"robotics",type:"school",createdAt:"2026-11-14T00:00:00.000Z"},
+  {id:"stu-2",name:"Kemi L.",email:"kemi@example.com",school:"riv",track:"ai",type:"school",createdAt:"2026-11-14T00:00:00.000Z"},
+  {id:"stu-3",name:"Daniel O.",email:"daniel@example.com",school:"independent",track:"coding",type:"independent",createdAt:"2026-11-14T00:00:00.000Z"}
+];
+var PRESENTATIONS=[
+  {id:"ppt-1",title:"Robot Rescue Demo",presenter:"Ada K.",school:"nor",track:"robotics",fileName:"robot-rescue-demo.pdf",notes:"Showcase demo for entry round.",createdAt:"2026-11-14T00:00:00.000Z"},
+  {id:"ppt-2",title:"Lost & Found App",presenter:"Kemi L.",school:"riv",track:"ai",fileName:"lost-found-app.mp4",notes:"Prototype review video.",createdAt:"2026-11-14T00:00:00.000Z"}
 ];
 var TEAMS=[
   {id:"t1",name:"Circuit Breakers",school:"uni",track:"robotics",members:["Tolu A.","Chidi N.","Fatima B.","Sam E."],open:false,needs:""},
@@ -504,6 +533,28 @@ var ANSWERS=[
 var ADMIN_PIN="2580";
 
 var LEVEL_NAMES=["Beginner","Intermediate","Advanced","Professional"];
+
+function getStoredApiKey(){
+  if(APP_SETTINGS && APP_SETTINGS.apiKey) return APP_SETTINGS.apiKey;
+  try{ return JSON.parse(localStorage.getItem(ADMIN_DATA_KEY)||"null") && JSON.parse(localStorage.getItem(ADMIN_DATA_KEY)||"null").apiKey || ""; }catch(e){ return ""; }
+}
+function loadAdminData(){
+  try{
+    var raw=JSON.parse(localStorage.getItem(ADMIN_DATA_KEY)||"null");
+    if(raw && Array.isArray(raw.students)) REGISTERED_STUDENTS = raw.students;
+    if(raw && Array.isArray(raw.presentations)) PRESENTATIONS = raw.presentations;
+    if(raw && typeof raw.apiKey === "string") APP_SETTINGS.apiKey = raw.apiKey;
+  }catch(e){}
+}
+function saveAdminData(){
+  try{
+    localStorage.setItem(ADMIN_DATA_KEY, JSON.stringify({
+      apiKey: APP_SETTINGS.apiKey || "",
+      students: REGISTERED_STUDENTS,
+      presentations: PRESENTATIONS
+    }));
+  }catch(e){}
+}
 var PATHS={
   prompt:[
     {title:"Prompt Starter",project:"Study Helper",
@@ -872,16 +923,42 @@ function deckFor(tk,l){
   ])};
 }
 
-/* progress kept on this device */
+/* progress kept locally and, when connected, mirrored to Supabase */
 var STORE_KEY="grey-challenge-v1";
+function syncSupabaseState(){
+  if(!supabase||!S.supabaseSession||!S.supabaseSession.user)return Promise.resolve();
+  var payload={
+    id:S.supabaseSession.user.id,
+    full_name:S.me.name,
+    school:S.me.school,
+    track:S.me.track,
+    joined:S.joined,
+    progress:S.progress,
+    checks:S.checks,
+    voted:S.voted,
+    answers:ANSWERS.filter(function(a){return a.mine;}),
+    projects:PROJECTS.filter(function(p){return p.mine;}),
+    updated_at:new Date().toISOString()
+  };
+  return supabase.from("profiles").upsert(payload,{onConflict:"id"}).then(function(resp){
+    if(resp&&resp.error){
+      if(resp.error.code!=="42P01"&&resp.error.code!=="PGRST301"){console.warn("Supabase sync failed:",resp.error);}
+    }
+  }).catch(function(){})
+}
 function save(){
   try{
     localStorage.setItem(STORE_KEY,JSON.stringify({joined:S.joined,me:S.me,progress:S.progress,checks:S.checks,voted:S.voted,
       answers:ANSWERS.filter(function(a){return a.mine;}),projects:PROJECTS.filter(function(p){return p.mine;})}));
+    saveAdminData();
   }catch(e){}
+  if(supabase){
+    syncSupabaseState();
+  }
 }
 function load(){
   try{
+    loadAdminData();
     var d=JSON.parse(localStorage.getItem(STORE_KEY)||"null");
     if(!d||!d.me||!d.me.name||!TRACKS[d.me.track])return;
     S.joined=!!d.joined;S.me=d.me;S.learnTrack=d.me.track;
@@ -894,6 +971,41 @@ function load(){
     (d.voted||[]).forEach(function(id){var p=find(PROJECTS,id);if(p&&S.voted.indexOf(id)<0){p.votes++;S.voted.push(id);}});
     (d.answers||[]).forEach(function(a){if(find(QUESTIONS,a.qid)&&!find(ANSWERS,a.id))ANSWERS.unshift(a);});
     (d.projects||[]).forEach(function(p){if(TRACKS[p.track]&&!find(PROJECTS,p.id))PROJECTS.push(p);});
+  }catch(e){}
+}
+function setAuthMessage(msg,kind){
+  var el=document.getElementById("auth-message");
+  if(!el)return;
+  if(!msg){el.style.display="none";el.textContent="";return;}
+  el.style.display="block";
+  el.textContent=msg;
+  el.style.background = kind === "error" ? "#ffe9e9" : "#dff7ef";
+  el.style.color = kind === "error" ? "#a12626" : "#0a7a5c";
+}
+async function initSupabaseSession(){
+  if(!supabase)return;
+  try{
+    var sessionRes=await supabase.auth.getSession();
+    if(sessionRes && sessionRes.data && sessionRes.data.session){
+      S.supabaseSession=sessionRes.data.session;
+      S.joined=true;
+      S.view="home";
+      if(sessionRes.data.session.user && sessionRes.data.session.user.user_metadata){
+        var meta=sessionRes.data.session.user.user_metadata;
+        if(meta.full_name)S.me.name=meta.full_name;
+        if(meta.school)S.me.school=meta.school;
+        if(meta.track)S.me.track=meta.track;
+      }
+    }
+    supabase.auth.onAuthStateChange(function(_event,session){
+      S.supabaseSession=session;
+      if(session){
+        S.joined=true;S.view="home";location.hash="home";
+      }else{
+        S.joined=false;S.view="signup";location.hash="signup";
+      }
+      render();
+    });
   }catch(e){}
 }
 function tutor(key){
@@ -924,7 +1036,8 @@ var S={
   view:"signup",learnTrack:"robotics",filter:"all",
   progress:{prompt:[2,0,0,0],coding:[1,0,0,0],ai:[0,0,0,0],robotics:[3,0,0,0]},viewLvl:{},
   voted:[],requested:[],open:[],
-  mode:null,slide:0,admin:false,adminTab:"answers",busy:{},aiMsg:"",pinError:false,checks:{},wrong:{},tutor:{},joined:false
+  mode:null,slide:0,admin:false,adminTab:"answers",busy:{},aiMsg:"",pinError:false,checks:{},wrong:{},tutor:{},joined:false,
+  supabaseSession:null
 };
 var VIEWS=["signup","home","learn","teams","showcase","schools","admin"];
 var NAV=[
@@ -943,7 +1056,7 @@ var STAGES=[
 ];
 
 function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
-function school(id){for(var i=0;i<SCHOOLS.length;i++){if(SCHOOLS[i].id===id)return SCHOOLS[i];}return SCHOOLS[0];}
+function school(id){for(var i=0;i<SCHOOLS.length;i++){if(SCHOOLS[i].id===id)return SCHOOLS[i];}return SCHOOLS[SCHOOLS.length-1];}
 function find(arr,id){for(var i=0;i<arr.length;i++){if(arr[i].id===id)return arr[i];}return null;}
 function toggleIn(arr,id){var i=arr.indexOf(id);if(i>-1){arr.splice(i,1);return false;}arr.push(id);return true;}
 function ordinal(n){var s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);}
@@ -1269,7 +1382,10 @@ function getSample(){
 }
 /* Outside Claude (for example on Vercel) the page asks its own server function. */
 function serverAI(prompt){
-  return fetch("/api/ai",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt:String(prompt)})}).then(function(r){
+  var apiKey = getStoredApiKey();
+  var headers = {"Content-Type":"application/json"};
+  if(apiKey){ headers["x-api-key"] = apiKey; }
+  return fetch("/api/ai",{method:"POST",headers:headers,body:JSON.stringify({prompt:String(prompt),apiKey:apiKey})}).then(function(r){
     if(r.status===429)throw {code:"rate_limited"};
     if(!r.ok)throw {code:"unavailable"};
     return r.json();
@@ -1355,7 +1471,7 @@ function vAdmin(){
   var tab=S.adminTab,body="";
   var needA=ANSWERS.filter(function(a){return a.score==null;}).length;
   var needP=PROJECTS.filter(function(p){return p.judge==null;}).length;
-  var tabs=[["answers","Answers"+(needA?" ("+needA+")":"")],["projects","Projects"+(needP?" ("+needP+")":"")],["questions","Questions"]].map(function(t){
+  var tabs=[["answers","Answers"+(needA?" ("+needA+")":"")],["projects","Projects"+(needP?" ("+needP+")":"")],["questions","Questions"],["students","Students"],["presentations","Presentations"],["api","API key"]].map(function(t){
     return '<button class="chip" type="button" data-action="admin-tab" data-id="'+t[0]+'" aria-pressed="'+(tab===t[0])+'">'+t[1]+'</button>';
   }).join("");
   var notice=S.aiMsg?'<p class="notice">'+esc(S.aiMsg)+'</p>':"";
@@ -1376,6 +1492,38 @@ function vAdmin(){
           (p.demo?'<div><span>Demo link</span>'+esc(p.demo)+'</div>':"")+(p.file?'<div><span>File</span>'+esc(p.file)+'</div>':"")+'</div>'+
           gradeControls("project",p.id,p.judge,70,p.feedback,p.by)+'</section>';
       }).join("");
+  }else if(tab==="students"){
+    var studentOpts=TRACK_IDS.map(function(k){return '<option value="'+k+'">'+esc(TRACKS[k].name)+'</option>';}).join("");
+    body='<form id="admin-student-form" class="card stack" style="gap:12px"><span class="sec">Add student</span>'+
+      '<div class="grid"><label class="field" for="student-name">Full name<input id="student-name" required placeholder="Student name"></label>'+
+      '<label class="field" for="student-email">Email<input id="student-email" type="email" required placeholder="student@email.com"></label></div>'+
+      '<div class="grid"><label class="field" for="student-school">School<select id="student-school">'+SCHOOLS.map(function(s){return '<option value="'+s.id+'">'+esc(s.name)+'</option>';}).join("")+'</select></label>'+
+      '<label class="field" for="student-track">Track<select id="student-track">'+studentOpts+'</select></label></div>'+
+      '<label class="check" for="student-independent"><input id="student-independent" type="checkbox">Independent student</label>'+
+      '<div><button class="btn" type="submit">Register student</button></div></form>'+
+      '<section class="card stack"><div class="row between"><span class="sec">Students registered</span><span class="pill mint">'+REGISTERED_STUDENTS.length+' present</span></div>'+
+      (REGISTERED_STUDENTS.length?REGISTERED_STUDENTS.map(function(student){
+        return '<div class="row between" style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.08)"><div><b>'+esc(student.name)+'</b><div class="muted">'+esc(student.email)+' · '+esc(school(student.school).name)+'</div></div><span class="pill plain">'+esc(student.type || 'school')+'</span></div>';
+      }).join(""):'<p class="muted">No student registrations yet.</p>')+'</section>';
+  }else if(tab==="presentations"){
+    body='<form id="presentation-form" class="card stack" style="gap:12px"><span class="sec">Upload presentation</span>'+
+      '<label class="field" for="presentation-title">Presentation title<input id="presentation-title" required placeholder="School Robotics Demo"></label>'+
+      '<div class="grid"><label class="field" for="presentation-presenter">Presenter<input id="presentation-presenter" required placeholder="Student name"></label>'+
+      '<label class="field" for="presentation-school">School<select id="presentation-school">'+SCHOOLS.map(function(s){return '<option value="'+s.id+'">'+esc(s.name)+'</option>';}).join("")+'</select></label></div>'+
+      '<div class="grid"><label class="field" for="presentation-track">Track<select id="presentation-track">'+TRACK_IDS.map(function(k){return '<option value="'+k+'">'+esc(TRACKS[k].name)+'</option>';}).join("")+'</select></label>'+
+      '<label class="field" for="presentation-file">File name<input id="presentation-file" placeholder="presentation.pdf"></label></div>'+
+      '<label class="field" for="presentation-notes">Notes<textarea id="presentation-notes" rows="2" placeholder="Short notes for the judges"></textarea></label>'+
+      '<div><button class="btn" type="submit">Add presentation</button></div></form>'+
+      '<section class="card stack"><div class="row between"><span class="sec">Uploaded presentations</span><span class="pill mint">'+PRESENTATIONS.length+'</span></div>'+
+      (PRESENTATIONS.length?PRESENTATIONS.map(function(p){
+        return '<div class="row between" style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.08)"><div><b>'+esc(p.title)+'</b><div class="muted">'+esc(p.presenter)+' · '+esc(school(p.school).name)+' · '+esc(TRACKS[p.track].name)+'</div></div><span class="pill plain">'+esc(p.fileName || 'No file')+'</span></div>';
+      }).join(""):'<p class="muted">No presentations uploaded yet.</p>')+'</section>';
+  }else if(tab==="api"){
+    body='<form id="api-key-form" class="card stack" style="gap:12px"><span class="sec">App API key</span>'+
+      '<p class="muted">Save the API key in the app so the web client can call the server route securely.</p>'+
+      '<label class="field" for="api-key">Anthropic API key<input id="api-key" type="password" value="'+esc(APP_SETTINGS.apiKey || "")+'" placeholder="Paste the supported key here"></label>'+
+      '<div><button class="btn" type="submit">Save API key</button></div></form>'+
+      '<section class="card stack"><div class="row between"><span class="sec">Connection status</span><span class="pill '+(APP_SETTINGS.apiKey?'mint':'sun')+'">'+(APP_SETTINGS.apiKey?'Configured':'Not configured')+'</span></div><p class="muted">The browser sends this key to /api/ai only when the admin saves it. The preferred production option is still a server-side Vercel env var.</p></section>';
   }else{
     var opts=TRACK_IDS.map(function(k){return '<option value="'+k+'">'+esc(TRACKS[k].name)+'</option>';}).join("");
     body='<form id="q-form" class="card stack" style="gap:12px"><span class="sec">Add a question</span>'+
@@ -1390,7 +1538,7 @@ function vAdmin(){
           '<b>'+esc(q.text)+'</b><p class="muted" style="font-size:14px">Good answer: '+esc(q.rubric)+'</p></section>';
       }).join("");
   }
-  return '<div class="view-head"><div class="row between"><h1>Admin</h1><button class="btn soft small" type="button" data-action="leave-admin">Leave admin</button></div><p>Set questions, grade answers and score project uploads.</p></div>'+
+  return '<div class="view-head"><div class="row between"><h1>Admin</h1><button class="btn soft small" type="button" data-action="leave-admin">Leave admin</button></div><p>Set questions, grade answers, manage students, upload presentations, and keep the app key current.</p></div>'+
     '<div class="chips" role="group" aria-label="Admin sections">'+tabs+'</div><div class="stack" style="max-width:820px">'+body+'</div>';
 }
 
@@ -1450,6 +1598,23 @@ document.addEventListener("click",function(e){
   var el=e.target.closest("[data-action]");
   if(!el)return;
   var a=el.getAttribute("data-action"),id=el.getAttribute("data-id"),tk=S.learnTrack;
+  if(a==="show-signin"){
+    var email = document.getElementById("su-email");
+    var password = document.getElementById("su-password");
+    if(email) email.focus();
+    if(password) password.focus();
+    setAuthMessage("Use the same email and password for your student account.","info");
+    return;
+  }
+  if(a==="sign-out"){
+    if(supabase){
+      supabase.auth.signOut().catch(function(){});
+    }
+    S.supabaseSession=null;S.joined=false;S.view="signup";setAuthMessage("");
+    location.hash="signup";
+    render();
+    return;
+  }
   if(a==="learn-track"){S.learnTrack=id;S.mode=null;}
   else if(a==="pick-level"){S.viewLvl[tk]=Number(id);S.mode=null;}
   else if(a==="stage-done"){setProgress(tk,getProg(tk)+1);S.mode=null;}
@@ -1502,22 +1667,50 @@ document.addEventListener("change",function(e){
   render();
 });
 
-document.addEventListener("submit",function(e){
+document.addEventListener("submit",async function(e){
   e.preventDefault();
   var fid=e.target.id,tk=S.learnTrack;
   function val(id){return document.getElementById(id).value.trim();}
   if(fid==="signup-form"){
     var name=val("su-name");
-    if(!name)return;
+    var email=val("su-email");
+    var password=val("su-password");
+    if(!name||!email||!password){setAuthMessage("Please add your name, email and password.","error");return;}
     var picked=document.querySelector("input[name=su-track]:checked");
     var t0=picked?picked.value:"prompt";
-    PROJECTS.forEach(function(p){if(S.voted.indexOf(p.id)>-1)p.votes--;p.mine=false;});
-    ANSWERS.forEach(function(a){a.mine=false;});
-    S.me={name:name,school:document.getElementById("su-school").value,track:t0,team:null};
-    S.voted=[];S.requested=[];S.learnTrack=t0;S.mode=null;S.checks={};S.wrong={};S.tutor={};S.joined=true;
-    S.progress={prompt:[0,0,0,0],coding:[0,0,0,0],ai:[0,0,0,0],robotics:[0,0,0,0]};S.viewLvl={};
-    save();
-    if(location.hash==="#home"){route();}else{location.hash="home";}
+    var isIndependent = document.getElementById("su-independent") && document.getElementById("su-independent").checked;
+    var schoolId = isIndependent ? "independent" : document.getElementById("su-school").value;
+    try{
+      if(supabase){
+        setAuthMessage("Creating your Supabase account…","info");
+        var signup = await supabase.auth.signUp({
+          email: email,
+          password: password,
+          options: { data: { full_name: name, school: schoolId, track: t0, independent: isIndependent ? true : false } }
+        });
+        if(signup.error){throw signup.error;}
+        var session = signup.data && signup.data.session;
+        if(!session){
+          var signin = await supabase.auth.signInWithPassword({ email: email, password: password });
+          if(signin.error){throw signin.error;}
+          session = signin.data && signin.data.session;
+        }
+        S.supabaseSession=session;
+      }
+      PROJECTS.forEach(function(p){if(S.voted.indexOf(p.id)>-1)p.votes--;p.mine=false;});
+      ANSWERS.forEach(function(a){a.mine=false;});
+      S.me={name:name,school:schoolId,track:t0,team:null};
+      S.voted=[];S.requested=[];S.learnTrack=t0;S.mode=null;S.checks={};S.wrong={};S.tutor={};S.joined=true;
+      S.progress={prompt:[0,0,0,0],coding:[0,0,0,0],ai:[0,0,0,0],robotics:[0,0,0,0]};S.viewLvl={};
+      if(isIndependent){
+        REGISTERED_STUDENTS.unshift({id:"stu-"+Date.now(),name:name,email:email,school:"independent",track:t0,type:"independent",createdAt:new Date().toISOString()});
+      }
+      save();
+      setAuthMessage("Account connected to Supabase. Your session is ready.","success");
+      if(location.hash==="#home"){route();}else{location.hash="home";}
+    }catch(err){
+      setAuthMessage(err && err.message ? err.message : "Could not sign in to Supabase.","error");
+    }
   }else if(fid==="new-team"){
     var tn=val("nt-name");
     if(!tn)return;
@@ -1543,6 +1736,27 @@ document.addEventListener("submit",function(e){
   }else if(fid==="admin-form"){
     if(val("admin-pin")===ADMIN_PIN){S.admin=true;S.pinError=false;}else{S.pinError=true;}
     render();
+  }else if(fid==="admin-student-form"){
+    var studentName=val("student-name");
+    var studentEmail=val("student-email");
+    if(!studentName||!studentEmail){setAuthMessage("Please add the student name and email.","error");return;}
+    var studentSchool=document.getElementById("student-school").value;
+    var studentTrack=document.getElementById("student-track").value;
+    var studentIndependent=document.getElementById("student-independent") && document.getElementById("student-independent").checked;
+    REGISTERED_STUDENTS.unshift({id:"stu-"+Date.now(),name:studentName,email:studentEmail,school:studentIndependent?"independent":studentSchool,track:studentTrack,type:studentIndependent?"independent":"school",createdAt:new Date().toISOString()});
+    saveAdminData();
+    render();
+  }else if(fid==="presentation-form"){
+    var presentationTitle=val("presentation-title");
+    var presenterName=val("presentation-presenter");
+    if(!presentationTitle||!presenterName){setAuthMessage("Please add the title and presenter.","error");return;}
+    PRESENTATIONS.unshift({id:"ppt-"+Date.now(),title:presentationTitle,presenter:presenterName,school:document.getElementById("presentation-school").value,track:document.getElementById("presentation-track").value,fileName:val("presentation-file")||"presentation.pdf",notes:document.getElementById("presentation-notes").value.trim(),createdAt:new Date().toISOString()});
+    saveAdminData();
+    render();
+  }else if(fid==="api-key-form"){
+    APP_SETTINGS.apiKey = document.getElementById("api-key").value.trim();
+    saveAdminData();
+    render();
   }else if(fid==="q-form"){
     QUESTIONS.unshift({id:"q"+Date.now(),track:document.getElementById("q-track").value,level:Number(document.getElementById("q-level").value),points:Number(document.getElementById("q-points").value),text:val("q-text"),rubric:val("q-rubric")});
     render();
@@ -1557,6 +1771,7 @@ document.getElementById("su-tracks").innerHTML=TRACK_IDS.map(function(k,i){
 }).join("");
 
 load();
+initSupabaseSession();
 window.addEventListener("hashchange",route);
 route();
 })();

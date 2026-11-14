@@ -8,10 +8,14 @@ module.exports = async function handler(req, res) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Use POST" });
   }
-  const key = process.env.ANTHROPIC_API_KEY;
+
+  const body = typeof req.body === "object" && req.body ? req.body : {};
+  const requestKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+  const headerKey = typeof req.headers["x-api-key"] === "string" ? req.headers["x-api-key"].trim() : "";
+  const key = requestKey || headerKey || process.env.ANTHROPIC_API_KEY;
   if (!key) return res.status(503).json({ error: "AI is not configured" });
 
-  const prompt = req.body && typeof req.body.prompt === "string" ? req.body.prompt : "";
+  const prompt = typeof body.prompt === "string" ? body.prompt : "";
   if (!prompt || prompt.length > MAX_PROMPT_CHARS) {
     return res.status(400).json({ error: "Prompt missing or too long" });
   }

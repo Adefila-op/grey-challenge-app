@@ -15,6 +15,16 @@
 `web/index.html` is the whole front end. `web/api/ai.js` is a server function that
 the AI tutor and AI grading call, so the key stays on the server.
 
+The admin page now includes a secure-ish internal PIN area for:
+
+- managing student registrations,
+- showing how many students are present,
+- uploading presentations,
+- saving the app API key,
+- and tracking independent student sign-ups.
+
+`web/supabase-schema.sql` contains the schema for the auth profile, students, presentations, and app settings tables.
+
 Optional environment variables:
 
 - `ANTHROPIC_MODEL`: defaults to `claude-haiku-5-5`.
