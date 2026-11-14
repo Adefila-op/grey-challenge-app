@@ -1014,6 +1014,45 @@ function setAuthMessage(msg,kind){
   el.style.background = kind === "error" ? "#ffe9e9" : "#dff7ef";
   el.style.color = kind === "error" ? "#a12626" : "#0a7a5c";
 }
+function getDemoUsers(){
+  try{return JSON.parse(localStorage.getItem("grey-demo-users")||"[]");}catch(e){return [];}
+}
+function saveDemoUsers(users){
+  try{localStorage.setItem("grey-demo-users",JSON.stringify(users));}catch(e){}
+}
+function applySignedInUser(details){
+  var name = details && details.full_name ? details.full_name : (details && details.name ? details.name : ((details && details.email) ? details.email.split("@")[0] : "Student"));
+  var school = details && details.school ? details.school : "independent";
+  var track = TRACKS[details && details.track] ? details.track : "prompt";
+  S.me = {name:name,school:school,track:track,team:null};
+  S.learnTrack = track;
+  S.joined = true;
+  S.view = "home";
+  setAuthMessage("Signed in successfully.","success");
+  save();
+  location.hash = "home";
+  route();
+}
+function resolveLocalDemoAuth(email,password){
+  var normalized = String(email || "").trim().toLowerCase();
+  var passwordValue = String(password || "");
+  if(!normalized || !passwordValue){return null;}
+  var demoUsers = getDemoUsers();
+  var defaultDemo = {email:"demo@grey.local",password:"grey123",full_name:"Grey Demo Student",school:"independent",track:"prompt",independent:true};
+  if(!demoUsers.some(function(u){return String(u.email || "").toLowerCase()===defaultDemo.email;})){
+    demoUsers.unshift(defaultDemo);
+    saveDemoUsers(demoUsers);
+  }
+  var match = demoUsers.find(function(u){
+    return String(u.email || "").toLowerCase() === normalized && String(u.password || "") === passwordValue;
+  });
+  return match ? {
+    full_name: match.full_name || match.name || normalized.split("@")[0],
+    email: match.email,
+    school: match.school || "independent",
+    track: TRACKS[match.track] ? match.track : "prompt"
+  } : null;
+}
 function toggleAuthForms(showSignin){
   var signupForm=document.getElementById("signup-form");
   var signinForm=document.getElementById("signin-form");
@@ -1631,6 +1670,11 @@ function route(){
   var h=(location.hash||"").replace("#","");
   S.view=VIEWS.indexOf(h)>-1?h:(S.joined?"home":"signup");
   S.mode=null;S.pinError=false;
+  if(S.view === "signup"){
+    toggleAuthForms(false);
+  } else {
+    toggleAuthForms(true);
+  }
   render();
   window.scrollTo(0,0);
 }
@@ -1733,6 +1777,11 @@ document.addEventListener("submit",async function(e){
     if(!signinEmail||!signinPassword){setAuthMessage("Please add your email and password.","error");return;}
     try{
       setAuthMessage("Signing you in…","info");
+      var demoSession = resolveLocalDemoAuth(signinEmail, signinPassword);
+      if(demoSession){
+        applySignedInUser(demoSession);
+        return;
+      }
       if(!supabase || !hasRealSupabaseConfig()){throw new Error("Supabase is not configured yet. Add your real project URL and anon key in web/supabase-config.js.");}
       var signIn = await supabase.auth.signInWithPassword({ email: signinEmail, password: signinPassword });
       if(signIn.error){throw signIn.error;}
@@ -1753,6 +1802,11 @@ document.addEventListener("submit",async function(e){
       location.hash = "home";
       route();
     }catch(err){
+      var demoFallback = resolveLocalDemoAuth(signinEmail, signinPassword);
+      if(demoFallback){
+        applySignedInUser(demoFallback);
+        return;
+      }
       var msg = err && err.message ? err.message : "Could not sign in to Supabase.";
       if(/email.*confirm|confirm.*email/i.test(msg)){
         msg = "Check your email and confirm the sign-up before logging in, or disable email verification in Supabase Authentication settings.";
@@ -1771,7 +1825,7 @@ document.addEventListener("submit",async function(e){
     var isIndependent = document.getElementById("su-independent") && document.getElementById("su-independent").checked;
     var schoolId = isIndependent ? "independent" : document.getElementById("su-school").value;
     try{
-      if(supabase || hasRealSupabaseConfig()){
+      if(supabase && hasRealSupabaseConfig()){
         setAuthMessage("Creating your Supabase account…","info");
         var signup = await supabase.auth.signUp({
           email: email,
@@ -1786,6 +1840,16 @@ document.addEventListener("submit",async function(e){
           session = signin.data && signin.data.session;
         }
         S.supabaseSession=session;
+      }else{
+        var demoUsers = getDemoUsers();
+        var existingUser = demoUsers.find(function(u){return String(u.email || "").toLowerCase() === String(email).trim().toLowerCase();});
+        if(existingUser && String(existingUser.password || "") !== String(password)){
+          throw new Error("An account with that email already exists. Use a different email or sign in with the correct password.");
+        }
+        if(!existingUser){
+          demoUsers.unshift({email:String(email).trim().toLowerCase(),password:String(password),full_name:name,school:schoolId,track:t0,independent:isIndependent});
+          saveDemoUsers(demoUsers);
+        }
       }
       PROJECTS.forEach(function(p){if(S.voted.indexOf(p.id)>-1)p.votes--;p.mine=false;});
       ANSWERS.forEach(function(a){a.mine=false;});
@@ -1796,7 +1860,7 @@ document.addEventListener("submit",async function(e){
         REGISTERED_STUDENTS.unshift({id:"stu-"+Date.now(),name:name,email:email,school:"independent",track:t0,type:"independent",createdAt:new Date().toISOString()});
       }
       save();
-      setAuthMessage("Account connected to Supabase. Your session is ready.","success");
+      setAuthMessage("Your account is ready. You are now signed in.","success");
       if(location.hash==="#home"){route();}else{location.hash="home";}
     }catch(err){
       var msg = err && err.message ? err.message : "Could not sign in to Supabase.";
