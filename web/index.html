@@ -372,6 +372,19 @@ ol.s-list li::before{content:counter(n);flex:none;width:30px;height:30px;border-
         <div id="auth-message" class="notice" style="display:none"></div>
         <button class="btn soft wide" type="button" data-action="show-signin">Sign in</button>
       </form>
+
+      <form id="signin-form" style="display:none;">
+        <h2>Sign in</h2>
+        <p class="muted">Use the same email and password you created for your account.</p>
+        <label class="field" for="si-email">Email address
+          <input id="si-email" type="email" required autocomplete="email" placeholder="you@example.com">
+        </label>
+        <label class="field" for="si-password">Password
+          <input id="si-password" type="password" required autocomplete="current-password" minlength="6" placeholder="Your password">
+        </label>
+        <button class="btn wide" type="submit">Sign in</button>
+        <button class="btn soft wide" type="button" data-action="show-signup">Create account</button>
+      </form>
     </div>
   </section>
 </div>
@@ -406,9 +419,9 @@ ol.s-list li::before{content:counter(n);flex:none;width:30px;height:30px;border-
 (function(){
 "use strict";
 
-var SUPABASE_URL = "https://nvqbucngwaalfezdncsx.supabase.co";
-var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im52cWJ1Y25nd2FhbGZlemRuY3N4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ2NDQ3ODcsImV4cCI6MjExMDIyMDc4N30.DC7H7W1ODVyCV_CQ7Pfn0bsmLkEJmYErIZc2HnpS5w4";
-var supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+var SUPABASE_URL = window.SUPABASE_URL || "";
+var SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "";
+var supabase = window.supabase && SUPABASE_URL && SUPABASE_ANON_KEY ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
 }) : null;
 
@@ -981,6 +994,12 @@ function setAuthMessage(msg,kind){
   el.textContent=msg;
   el.style.background = kind === "error" ? "#ffe9e9" : "#dff7ef";
   el.style.color = kind === "error" ? "#a12626" : "#0a7a5c";
+}
+function toggleAuthForms(showSignin){
+  var signupForm=document.getElementById("signup-form");
+  var signinForm=document.getElementById("signin-form");
+  if(signupForm){signupForm.style.display = showSignin ? "none" : "block";}
+  if(signinForm){signinForm.style.display = showSignin ? "block" : "none";}
 }
 async function initSupabaseSession(){
   if(!supabase)return;
@@ -1599,11 +1618,17 @@ document.addEventListener("click",function(e){
   if(!el)return;
   var a=el.getAttribute("data-action"),id=el.getAttribute("data-id"),tk=S.learnTrack;
   if(a==="show-signin"){
-    var email = document.getElementById("su-email");
-    var password = document.getElementById("su-password");
+    toggleAuthForms(true);
+    var email = document.getElementById("si-email");
     if(email) email.focus();
-    if(password) password.focus();
     setAuthMessage("Use the same email and password for your student account.","info");
+    return;
+  }
+  if(a==="show-signup"){
+    toggleAuthForms(false);
+    var nameField = document.getElementById("su-name");
+    if(nameField) nameField.focus();
+    setAuthMessage("Create a new account to join the challenge.","info");
     return;
   }
   if(a==="sign-out"){
@@ -1671,6 +1696,36 @@ document.addEventListener("submit",async function(e){
   e.preventDefault();
   var fid=e.target.id,tk=S.learnTrack;
   function val(id){return document.getElementById(id).value.trim();}
+  if(fid==="signin-form"){
+    var signinEmail=val("si-email");
+    var signinPassword=val("si-password");
+    if(!signinEmail||!signinPassword){setAuthMessage("Please add your email and password.","error");return;}
+    try{
+      setAuthMessage("Signing you in…","info");
+      if(!supabase){throw new Error("Supabase is not available.");}
+      var signIn = await supabase.auth.signInWithPassword({ email: signinEmail, password: signinPassword });
+      if(signIn.error){throw signIn.error;}
+      var session = signIn.data && signIn.data.session;
+      S.supabaseSession = session;
+      var userMeta = session && session.user && session.user.user_metadata ? session.user.user_metadata : {};
+      S.me = {
+        name: userMeta.full_name || signinEmail.split("@")[0],
+        school: userMeta.school || "independent",
+        track: userMeta.track || "prompt",
+        team: null
+      };
+      S.joined = true;
+      S.learnTrack = S.me.track;
+      S.view = "home";
+      setAuthMessage("Signed in successfully.","success");
+      save();
+      location.hash = "home";
+      route();
+    }catch(err){
+      setAuthMessage(err && err.message ? err.message : "Could not sign in to Supabase.","error");
+    }
+    return;
+  }
   if(fid==="signup-form"){
     var name=val("su-name");
     var email=val("su-email");
