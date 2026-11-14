@@ -414,16 +414,25 @@ ol.s-list li::before{content:counter(n);flex:none;width:30px;height:30px;border-
   <nav class="tabs" id="tab-nav" aria-label="Sections"></nav>
 </div>
 
+<script src="./supabase-config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (function(){
 "use strict";
 
-var SUPABASE_URL = window.SUPABASE_URL || "";
-var SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "";
-var supabase = window.supabase && SUPABASE_URL && SUPABASE_ANON_KEY ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+var runtimeConfig = window.__GREY_SUPABASE__ || {};
+var SUPABASE_URL = window.SUPABASE_URL || runtimeConfig.url || "";
+var SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || runtimeConfig.anonKey || "";
+function hasRealSupabaseConfig(){
+  return !!(SUPABASE_URL && SUPABASE_ANON_KEY && !/YOUR_PROJECT_ID|YOUR_SUPABASE_ANON_KEY/i.test(SUPABASE_URL + "|" + SUPABASE_ANON_KEY));
+}
+var supabase = window.supabase && hasRealSupabaseConfig() ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
 }) : null;
+
+if(!hasRealSupabaseConfig()){
+  console.warn("Supabase is not configured. Add your real project URL and anon key in web/supabase-config.js or set window.SUPABASE_URL and window.SUPABASE_ANON_KEY before this script loads.");
+}
 
 var ICON = {
   prompt:'<svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-5 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/><path d="M8 10h8M8 13h5"/></svg>',
@@ -1702,7 +1711,7 @@ document.addEventListener("submit",async function(e){
     if(!signinEmail||!signinPassword){setAuthMessage("Please add your email and password.","error");return;}
     try{
       setAuthMessage("Signing you in…","info");
-      if(!supabase){throw new Error("Supabase is not available.");}
+      if(!supabase || !hasRealSupabaseConfig()){throw new Error("Supabase is not configured yet. Add your real project URL and anon key in web/supabase-config.js.");}
       var signIn = await supabase.auth.signInWithPassword({ email: signinEmail, password: signinPassword });
       if(signIn.error){throw signIn.error;}
       var session = signIn.data && signIn.data.session;
@@ -1722,7 +1731,11 @@ document.addEventListener("submit",async function(e){
       location.hash = "home";
       route();
     }catch(err){
-      setAuthMessage(err && err.message ? err.message : "Could not sign in to Supabase.","error");
+      var msg = err && err.message ? err.message : "Could not sign in to Supabase.";
+      if(/email.*confirm|confirm.*email/i.test(msg)){
+        msg = "Check your email and confirm the sign-up before logging in, or disable email verification in Supabase Authentication settings.";
+      }
+      setAuthMessage(msg,"error");
     }
     return;
   }
@@ -1736,7 +1749,7 @@ document.addEventListener("submit",async function(e){
     var isIndependent = document.getElementById("su-independent") && document.getElementById("su-independent").checked;
     var schoolId = isIndependent ? "independent" : document.getElementById("su-school").value;
     try{
-      if(supabase){
+      if(supabase || hasRealSupabaseConfig()){
         setAuthMessage("Creating your Supabase account…","info");
         var signup = await supabase.auth.signUp({
           email: email,
@@ -1764,7 +1777,11 @@ document.addEventListener("submit",async function(e){
       setAuthMessage("Account connected to Supabase. Your session is ready.","success");
       if(location.hash==="#home"){route();}else{location.hash="home";}
     }catch(err){
-      setAuthMessage(err && err.message ? err.message : "Could not sign in to Supabase.","error");
+      var msg = err && err.message ? err.message : "Could not sign in to Supabase.";
+      if(/email.*confirm|confirm.*email/i.test(msg)){
+        msg = "Account created. Please confirm your email in Supabase Auth, or turn off email confirmation for instant sign-up.";
+      }
+      setAuthMessage(msg,"error");
     }
   }else if(fid==="new-team"){
     var tn=val("nt-name");
