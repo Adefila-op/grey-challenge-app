@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "Grey Challenge",
+    "slug": "grey-challenge",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "android": {
+      "package": "com.greyconsult.challenge"
+    }
+  }
+}
