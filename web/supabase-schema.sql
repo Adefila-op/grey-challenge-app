@@ -163,7 +163,18 @@ create trigger on_auth_user_created
 after insert on auth.users
 for each row execute procedure public.handle_new_user();
 
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
 create trigger handle_updated_at
 before update on public.profiles
 for each row
-execute procedure moddatetime(updated_at);
+execute procedure public.set_updated_at();
