@@ -996,9 +996,10 @@ async function resolveClientIp(){
   setStoredClientIp(fallback);
   return fallback;
 }
-function upsertGlobalUserRecord(details){
+function persistGlobalUserRecord(details){
   var profile = normaliseUserRecord(details);
   var ip = getStoredClientIp() || "local-preview";
+  setStoredClientIp(ip);
   profile.ip = ip;
   profile.lastSeen = new Date().toISOString();
   var users = getGlobalUsers();
@@ -1011,26 +1012,71 @@ function upsertGlobalUserRecord(details){
   saveGlobalUsers(users);
   return profile;
 }
-function syncSupabaseState(){
+function upsertGlobalUserRecord(details){
+  return persistGlobalUserRecord(details);
+}
+async function hydrateSupabaseProfile(){
+  if(!supabase||!S.supabaseSession||!S.supabaseSession.user){return null;}
+  try{
+    var res = await supabase.from("profiles").select("*").eq("id", S.supabaseSession.user.id).maybeSingle();
+    if(res && res.error){
+      if(res.error.code !== "42P01" && res.error.code !== "PGRST301"){console.warn("Supabase profile load failed:", res.error);}
+      return null;
+    }
+    var row = res && res.data ? res.data : null;
+    if(!row){return null;}
+    S.me = Object.assign({}, S.me, {
+      name: row.full_name || S.me.name,
+      school: row.school || S.me.school,
+      track: TRACKS[row.track] ? row.track : S.me.track,
+      email: String(row.email || S.me.email || "").trim().toLowerCase(),
+      team: S.me.team || null,
+      ip: getStoredClientIp() || S.me.ip || "local-preview"
+    });
+    S.learnTrack = S.me.track;
+    if(row.progress && typeof row.progress === "object"){
+      TRACK_IDS.forEach(function(k){
+        var p = row.progress[k];
+        if(Array.isArray(p) && p.length === 4){S.progress[k] = p.map(function(v){return Math.max(0,Math.min(5,Number(v)||0));});}
+      });
+    }
+    if(row.checks && typeof row.checks === "object") S.checks = row.checks;
+    if(Array.isArray(row.voted)) S.voted = row.voted.slice();
+    if(Array.isArray(row.answers)) ANSWERS = row.answers.slice();
+    if(Array.isArray(row.projects)) PROJECTS = row.projects.slice();
+    if(row.joined !== undefined) S.joined = !!row.joined;
+    return row;
+  }catch(err){
+    console.warn("Supabase profile hydration failed:", err);
+    return null;
+  }
+}
+async function syncSupabaseState(){
   if(!supabase||!S.supabaseSession||!S.supabaseSession.user)return Promise.resolve();
   var payload={
     id:S.supabaseSession.user.id,
     full_name:S.me.name,
+    email:String(S.me.email || "").trim().toLowerCase(),
     school:S.me.school,
     track:S.me.track,
     joined:S.joined,
     progress:S.progress,
     checks:S.checks,
     voted:S.voted,
-    answers:ANSWERS.filter(function(a){return a.mine;}),
-    projects:PROJECTS.filter(function(p){return p.mine;}),
+    answers:ANSWERS.filter(function(a){return a.mine || String(a.student || "") === String(S.me.name || "");}),
+    projects:PROJECTS.filter(function(p){return p.mine || String(p.team || "") === String(S.me.name || "") || String(p.school || "") === String(S.me.school || "");}),
     updated_at:new Date().toISOString()
   };
-  return supabase.from("profiles").upsert(payload,{onConflict:"id"}).then(function(resp){
-    if(resp&&resp.error){
-      if(resp.error.code!=="42P01"&&resp.error.code!=="PGRST301"){console.warn("Supabase sync failed:",resp.error);}
+  try{
+    var resp = await supabase.from("profiles").upsert(payload,{onConflict:"id"});
+    if(resp && resp.error){
+      if(resp.error.code !== "42P01" && resp.error.code !== "PGRST301"){console.warn("Supabase sync failed:", resp.error);}
     }
-  }).catch(function(){})
+    return resp;
+  }catch(err){
+    console.warn("Supabase sync error:", err);
+    return null;
+  }
 }
 function mergePersistedItems(target, items, keyName){
   if(!Array.isArray(items)) return;
@@ -1041,6 +1087,11 @@ function mergePersistedItems(target, items, keyName){
 }
 function save(){
   try{
+    var ip = getStoredClientIp() || "local-preview";
+    setStoredClientIp(ip);
+    if(S && S.me){
+      upsertGlobalUserRecord(S.me);
+    }
     var snapshot = {
       joined:S.joined,
       me:S.me,
@@ -1058,13 +1109,13 @@ function save(){
       viewLvl:S.viewLvl,
       requested:S.requested,
       open:S.open,
-      lastSeenIp:getStoredClientIp()||"local-preview",
+      lastSeenIp:ip,
       updatedAt:new Date().toISOString()
     };
     localStorage.setItem(STORE_KEY,JSON.stringify(snapshot));
     saveAdminData();
   }catch(e){}
-  if(supabase){
+  if(supabase && S.supabaseSession && S.supabaseSession.user){
     syncSupabaseState();
   }
 }
@@ -1197,6 +1248,7 @@ async function initSupabaseSession(){
     var sessionRes=await supabase.auth.getSession();
     if(sessionRes && sessionRes.data && sessionRes.data.session){
       S.supabaseSession=sessionRes.data.session;
+      await hydrateSupabaseProfile();
       S.joined=true;
       S.view="home";
       if(sessionRes.data.session.user && sessionRes.data.session.user.user_metadata){
@@ -1206,10 +1258,12 @@ async function initSupabaseSession(){
         if(meta.track)S.me.track=meta.track;
       }
     }
-    supabase.auth.onAuthStateChange(function(_event,session){
+    supabase.auth.onAuthStateChange(async function(_event,session){
       S.supabaseSession=session;
       if(session){
-        S.joined=true;S.view="home";location.hash="home";
+        S.joined=true;
+        await hydrateSupabaseProfile();
+        S.view="home";location.hash="home";
       }else{
         S.joined=false;S.view="signup";location.hash="signup";
       }
