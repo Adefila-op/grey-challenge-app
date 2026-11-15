@@ -961,6 +961,56 @@ function deckFor(tk,l){
 
 /* progress kept locally and, when connected, mirrored to Supabase */
 var STORE_KEY="grey-challenge-v1";
+var GLOBAL_USERS_KEY="grey-global-users-v1";
+var DEVICE_IP_KEY="grey-device-ip-v1";
+function getStoredClientIp(){
+  try{return localStorage.getItem(DEVICE_IP_KEY)||"";}catch(e){return "";}
+}
+function setStoredClientIp(ip){
+  try{if(ip){localStorage.setItem(DEVICE_IP_KEY, String(ip));}}catch(e){}
+}
+function normaliseUserRecord(details){
+  var email = details && details.email ? String(details.email).trim().toLowerCase() : "";
+  var name = details && details.full_name ? details.full_name : (details && details.name ? details.name : ((details && details.email) ? details.email.split("@")[0] : "Student"));
+  var school = details && details.school ? details.school : "independent";
+  var track = TRACKS[details && details.track] ? details.track : "prompt";
+  return {name:name,school:school,track:track,email:email,team:details && details.team ? details.team : null};
+}
+function getGlobalUsers(){
+  try{return JSON.parse(localStorage.getItem(GLOBAL_USERS_KEY)||"[]");}catch(e){return [];} 
+}
+function saveGlobalUsers(users){
+  try{localStorage.setItem(GLOBAL_USERS_KEY, JSON.stringify(users));}catch(e){}
+}
+async function resolveClientIp(){
+  var current = getStoredClientIp();
+  if(current) return current;
+  try{
+    if(typeof fetch === "function"){
+      var res = await fetch("https://api.ipify.org?format=json", {cache:"no-store"});
+      var json = await res.json();
+      if(json && json.ip){ setStoredClientIp(json.ip); return json.ip; }
+    }
+  }catch(e){}
+  var fallback = "local-preview";
+  setStoredClientIp(fallback);
+  return fallback;
+}
+function upsertGlobalUserRecord(details){
+  var profile = normaliseUserRecord(details);
+  var ip = getStoredClientIp() || "local-preview";
+  profile.ip = ip;
+  profile.lastSeen = new Date().toISOString();
+  var users = getGlobalUsers();
+  var idx = users.findIndex(function(u){return (u.email && profile.email && String(u.email).toLowerCase()===String(profile.email).toLowerCase()) || (u.ip && u.ip===ip);});
+  if(idx>=0){
+    users[idx] = Object.assign({}, users[idx], profile, {updatedAt: profile.lastSeen});
+  }else{
+    users.unshift(profile);
+  }
+  saveGlobalUsers(users);
+  return profile;
+}
 function syncSupabaseState(){
   if(!supabase||!S.supabaseSession||!S.supabaseSession.user)return Promise.resolve();
   var payload={
@@ -982,10 +1032,36 @@ function syncSupabaseState(){
     }
   }).catch(function(){})
 }
+function mergePersistedItems(target, items, keyName){
+  if(!Array.isArray(items)) return;
+  items.forEach(function(item){
+    if(!item || !item.id) return;
+    if(!find(target, item.id)) target.push(item);
+  });
+}
 function save(){
   try{
-    localStorage.setItem(STORE_KEY,JSON.stringify({joined:S.joined,me:S.me,progress:S.progress,checks:S.checks,voted:S.voted,
-      answers:ANSWERS.filter(function(a){return a.mine;}),projects:PROJECTS.filter(function(p){return p.mine;})}));
+    var snapshot = {
+      joined:S.joined,
+      me:S.me,
+      learnTrack:S.learnTrack,
+      view:S.view,
+      progress:S.progress,
+      checks:S.checks,
+      voted:S.voted,
+      answers:ANSWERS.filter(function(a){return a.mine;}),
+      projects:PROJECTS.filter(function(p){return p.mine;}),
+      teams:TEAMS,
+      questions:QUESTIONS,
+      registeredStudents:REGISTERED_STUDENTS,
+      presentations:PRESENTATIONS,
+      viewLvl:S.viewLvl,
+      requested:S.requested,
+      open:S.open,
+      lastSeenIp:getStoredClientIp()||"local-preview",
+      updatedAt:new Date().toISOString()
+    };
+    localStorage.setItem(STORE_KEY,JSON.stringify(snapshot));
     saveAdminData();
   }catch(e){}
   if(supabase){
@@ -997,16 +1073,23 @@ function load(){
     loadAdminData();
     var d=JSON.parse(localStorage.getItem(STORE_KEY)||"null");
     if(!d||!d.me||!d.me.name||!TRACKS[d.me.track])return;
-    S.joined=!!d.joined;S.me=d.me;S.learnTrack=d.me.track;
+    S.joined=!!d.joined;S.me=d.me;S.learnTrack=d.learnTrack || d.me.track;S.view=d.view || S.view;S.viewLvl=d.viewLvl || {};
     if(!find(TEAMS,S.me.team))S.me.team=null;
     TRACK_IDS.forEach(function(k){
       var p=d.progress&&d.progress[k];
       if(Array.isArray(p)&&p.length===4)S.progress[k]=p.map(function(n){return Math.max(0,Math.min(5,Number(n)||0));});
     });
     S.checks=d.checks||{};
+    S.requested=Array.isArray(d.requested)?d.requested:[];
+    S.open=Array.isArray(d.open)?d.open:[];
     (d.voted||[]).forEach(function(id){var p=find(PROJECTS,id);if(p&&S.voted.indexOf(id)<0){p.votes++;S.voted.push(id);}});
     (d.answers||[]).forEach(function(a){if(find(QUESTIONS,a.qid)&&!find(ANSWERS,a.id))ANSWERS.unshift(a);});
     (d.projects||[]).forEach(function(p){if(TRACKS[p.track]&&!find(PROJECTS,p.id))PROJECTS.push(p);});
+    if(Array.isArray(d.teams)) mergePersistedItems(TEAMS, d.teams);
+    if(Array.isArray(d.questions)) mergePersistedItems(QUESTIONS, d.questions);
+    if(Array.isArray(d.presentations)) mergePersistedItems(PRESENTATIONS, d.presentations);
+    if(Array.isArray(d.registeredStudents)) mergePersistedItems(REGISTERED_STUDENTS, d.registeredStudents);
+    if(d.lastSeenIp){ setStoredClientIp(d.lastSeenIp); }
   }catch(e){}
 }
 function setAuthMessage(msg,kind){
@@ -1024,12 +1107,45 @@ function getDemoUsers(){
 function saveDemoUsers(users){
   try{localStorage.setItem("grey-demo-users",JSON.stringify(users));}catch(e){}
 }
-function applySignedInUser(details){
-  var name = details && details.full_name ? details.full_name : (details && details.name ? details.name : ((details && details.email) ? details.email.split("@")[0] : "Student"));
-  var school = details && details.school ? details.school : "independent";
-  var track = TRACKS[details && details.track] ? details.track : "prompt";
-  S.me = {name:name,school:school,track:track,team:null};
-  S.learnTrack = track;
+async function applySignedInUser(details){
+  var profile = normaliseUserRecord(details);
+  var ip = await resolveClientIp();
+  profile.ip = ip;
+  profile.lastSeen = new Date().toISOString();
+  var stored = null;
+  try{stored = JSON.parse(localStorage.getItem(STORE_KEY)||"null");}catch(e){}
+  if(stored && stored.me && stored.me.name){
+    var emailMatches = profile.email && stored.me.email && String(stored.me.email).trim().toLowerCase() === String(profile.email).trim().toLowerCase();
+    var ipMatches = ip && stored.me.ip && String(stored.me.ip) === String(ip);
+    var nameMatches = !profile.email && stored.me.name === profile.name;
+    if(emailMatches || ipMatches || nameMatches){
+      S.joined = !!stored.joined;S.me = Object.assign({}, stored.me, profile, {name:profile.name,school:profile.school,track:profile.track,email:profile.email||stored.me.email||"",ip:ip});
+      S.learnTrack = profile.track;
+      S.progress = makeEmptyProgress();
+      if(stored.progress){
+        TRACK_IDS.forEach(function(k){
+          var p = stored.progress[k];
+          if(Array.isArray(p)&&p.length===4){S.progress[k]=p.map(function(n){return Math.max(0,Math.min(5,Number(n)||0));});}
+        });
+      }
+      S.viewLvl = stored.viewLvl || {};
+      S.checks = stored.checks || {};
+      S.wrong = {};
+      S.voted = Array.isArray(stored.voted) ? stored.voted.slice() : [];
+      S.requested = Array.isArray(stored.requested) ? stored.requested.slice() : [];
+      S.open = Array.isArray(stored.open) ? stored.open.slice() : [];
+      S.tutor = {};
+      S.view = "home";
+      upsertGlobalUserRecord(S.me);
+      setAuthMessage("Signed in successfully.","success");
+      save();
+      location.hash = "home";
+      route();
+      return;
+    }
+  }
+  S.me = {name:profile.name,school:profile.school,track:profile.track,team:null,email:profile.email,ip:ip};
+  S.learnTrack = profile.track;
   S.progress = makeEmptyProgress();
   S.viewLvl = {};
   S.checks = {};
@@ -1040,6 +1156,7 @@ function applySignedInUser(details){
   S.tutor = {};
   S.joined = true;
   S.view = "home";
+  upsertGlobalUserRecord(S.me);
   setAuthMessage("Signed in successfully.","success");
   save();
   location.hash = "home";
@@ -1794,7 +1911,7 @@ document.addEventListener("submit",async function(e){
       setAuthMessage("Signing you in…","info");
       var demoSession = resolveLocalDemoAuth(signinEmail, signinPassword);
       if(demoSession){
-        applySignedInUser(demoSession);
+        await applySignedInUser(demoSession);
         return;
       }
       if(!supabase || !hasRealSupabaseConfig()){
@@ -1810,7 +1927,8 @@ document.addEventListener("submit",async function(e){
         name: userMeta.full_name || signinEmail.split("@")[0],
         school: userMeta.school || "independent",
         track: userMeta.track || "prompt",
-        team: null
+        team: null,
+        email: signinEmail.trim().toLowerCase()
       };
       S.progress = makeEmptyProgress();
       S.viewLvl = {};
@@ -1830,7 +1948,7 @@ document.addEventListener("submit",async function(e){
     }catch(err){
       var demoFallback = resolveLocalDemoAuth(signinEmail, signinPassword);
       if(demoFallback){
-        applySignedInUser(demoFallback);
+        await applySignedInUser(demoFallback);
         return;
       }
       var msg = err && err.message ? err.message : "Could not sign in to Supabase.";
@@ -1897,8 +2015,9 @@ document.addEventListener("submit",async function(e){
       }
       PROJECTS.forEach(function(p){if(S.voted.indexOf(p.id)>-1)p.votes--;p.mine=false;});
       ANSWERS.forEach(function(a){a.mine=false;});
-      S.me={name:name,school:schoolId,track:t0,team:null};
+      S.me={name:name,school:schoolId,track:t0,team:null,email:String(email).trim().toLowerCase(),ip:getStoredClientIp()||"local-preview"};
       S.voted=[];S.requested=[];S.learnTrack=t0;S.mode=null;S.checks={};S.wrong={};S.tutor={};S.joined=true;
+      upsertGlobalUserRecord(S.me);
       S.progress=makeEmptyProgress();S.viewLvl={};
       if(isIndependent){
         REGISTERED_STUDENTS.unshift({id:"stu-"+Date.now(),name:name,email:email,school:"independent",track:t0,type:"independent",createdAt:new Date().toISOString()});
