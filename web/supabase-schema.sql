@@ -17,6 +17,9 @@ create table if not exists public.profiles (
   voted jsonb default '[]',
   answers jsonb default '[]',
   projects jsonb default '[]',
+  ip_address text,
+  last_seen_ip text,
+  last_seen_at timestamptz,
   updated_at timestamptz default now()
 );
 
@@ -57,19 +60,23 @@ alter table public.students enable row level security;
 alter table public.presentations enable row level security;
 alter table public.app_settings enable row level security;
 
+drop policy if exists "Users can view their own profile" on public.profiles;
 create policy "Users can view their own profile"
 on public.profiles for select
 using (auth.uid() = id);
 
+drop policy if exists "Users can update their own profile" on public.profiles;
 create policy "Users can update their own profile"
 on public.profiles for update
 using (auth.uid() = id)
 with check (auth.uid() = id);
 
+drop policy if exists "Users can insert their own profile" on public.profiles;
 create policy "Users can insert their own profile"
 on public.profiles for insert
 with check (auth.uid() = id);
 
+drop policy if exists "Admins can view all profiles" on public.profiles;
 create policy "Admins can view all profiles"
 on public.profiles for select
 using (
@@ -79,6 +86,7 @@ using (
   )
 );
 
+drop policy if exists "Admins can manage all students" on public.students;
 create policy "Admins can manage all students"
 on public.students for all
 using (
@@ -94,6 +102,7 @@ with check (
   )
 );
 
+drop policy if exists "Admins can manage presentations" on public.presentations;
 create policy "Admins can manage presentations"
 on public.presentations for all
 using (
@@ -109,6 +118,7 @@ with check (
   )
 );
 
+drop policy if exists "Admins can manage app settings" on public.app_settings;
 create policy "Admins can manage app settings"
 on public.app_settings for all
 using (
@@ -159,6 +169,7 @@ begin
 end;
 $$;
 
+drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
 after insert on auth.users
 for each row execute procedure public.handle_new_user();
@@ -174,6 +185,7 @@ begin
 end;
 $$;
 
+drop trigger if exists handle_updated_at on public.profiles;
 create trigger handle_updated_at
 before update on public.profiles
 for each row

@@ -1024,14 +1024,18 @@ async function hydrateSupabaseProfile(){
       return null;
     }
     var row = res && res.data ? res.data : null;
-    if(!row){return null;}
+    if(!row){
+      await syncSupabaseState();
+      return null;
+    }
+    var remoteIp = row.last_seen_ip || row.ip_address || getStoredClientIp() || S.me.ip || "local-preview";
     S.me = Object.assign({}, S.me, {
       name: row.full_name || S.me.name,
       school: row.school || S.me.school,
       track: TRACKS[row.track] ? row.track : S.me.track,
       email: String(row.email || S.me.email || "").trim().toLowerCase(),
       team: S.me.team || null,
-      ip: getStoredClientIp() || S.me.ip || "local-preview"
+      ip: remoteIp
     });
     S.learnTrack = S.me.track;
     if(row.progress && typeof row.progress === "object"){
@@ -1045,6 +1049,7 @@ async function hydrateSupabaseProfile(){
     if(Array.isArray(row.answers)) ANSWERS = row.answers.slice();
     if(Array.isArray(row.projects)) PROJECTS = row.projects.slice();
     if(row.joined !== undefined) S.joined = !!row.joined;
+    if(row.last_seen_ip || row.ip_address) setStoredClientIp(remoteIp);
     return row;
   }catch(err){
     console.warn("Supabase profile hydration failed:", err);
@@ -1053,6 +1058,7 @@ async function hydrateSupabaseProfile(){
 }
 async function syncSupabaseState(){
   if(!supabase||!S.supabaseSession||!S.supabaseSession.user)return Promise.resolve();
+  var remoteIp = getStoredClientIp() || S.me.ip || "local-preview";
   var payload={
     id:S.supabaseSession.user.id,
     full_name:S.me.name,
@@ -1065,6 +1071,9 @@ async function syncSupabaseState(){
     voted:S.voted,
     answers:ANSWERS.filter(function(a){return a.mine || String(a.student || "") === String(S.me.name || "");}),
     projects:PROJECTS.filter(function(p){return p.mine || String(p.team || "") === String(S.me.name || "") || String(p.school || "") === String(S.me.school || "");}),
+    ip_address:remoteIp,
+    last_seen_ip:remoteIp,
+    last_seen_at:new Date().toISOString(),
     updated_at:new Date().toISOString()
   };
   try{
@@ -1116,7 +1125,9 @@ function save(){
     saveAdminData();
   }catch(e){}
   if(supabase && S.supabaseSession && S.supabaseSession.user){
-    syncSupabaseState();
+    syncSupabaseState().catch(function(err){
+      console.warn("Supabase save failed:", err);
+    });
   }
 }
 function load(){
