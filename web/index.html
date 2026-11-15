@@ -1015,6 +1015,72 @@ function persistGlobalUserRecord(details){
 function upsertGlobalUserRecord(details){
   return persistGlobalUserRecord(details);
 }
+async function ensureSupabaseProfileForSession(session, fallback){
+  if(!supabase || !session || !session.user){return null;}
+  var user = session.user;
+  var email = String((fallback && fallback.email) || user.email || S.me.email || "").trim().toLowerCase();
+  var fullName = (fallback && fallback.full_name) || (user.user_metadata && user.user_metadata.full_name) || S.me.name || (email ? email.split("@")[0] : "Student");
+  var school = (fallback && fallback.school) || (user.user_metadata && user.user_metadata.school) || S.me.school || "independent";
+  var track = (fallback && fallback.track) || (user.user_metadata && user.user_metadata.track) || S.me.track || "prompt";
+  var independent = !!((fallback && fallback.independent) || (user.user_metadata && (user.user_metadata.independent === true || user.user_metadata.independent === "true")) || S.me.independent);
+  try{
+    var probe = await supabase.from("profiles").select("id").eq("id", user.id).maybeSingle();
+    if(probe && probe.error){
+      if(probe.error.code !== "42P01" && probe.error.code !== "PGRST301"){console.warn("Supabase profile probe failed:", probe.error);}
+      return null;
+    }
+    if(probe && probe.data){
+      var updatePayload = {
+        full_name: fullName,
+        email: email,
+        school: school,
+        school_code: (fallback && fallback.school_code) || (user.user_metadata && user.user_metadata.school_code) || null,
+        track: track,
+        independent_student: independent,
+        joined: !!S.joined,
+        last_seen_ip: getStoredClientIp() || S.me.ip || "local-preview",
+        last_seen_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      var updateRes = await supabase.from("profiles").update(updatePayload).eq("id", user.id);
+      if(updateRes && updateRes.error && !/does not exist|no rows/i.test(String(updateRes.error.message || ""))){
+        console.warn("Supabase profile update failed:", updateRes.error);
+      }
+      return probe.data;
+    }
+    var insertRes = await supabase.from("profiles").insert([{
+      id: user.id,
+      full_name: fullName,
+      email: email,
+      school: school,
+      school_code: (fallback && fallback.school_code) || (user.user_metadata && user.user_metadata.school_code) || null,
+      track: track,
+      independent_student: independent,
+      role: "student",
+      is_admin: false,
+      joined: !!S.joined,
+      progress: {},
+      checks: {},
+      voted: [],
+      answers: [],
+      projects: [],
+      ip_address: getStoredClientIp() || S.me.ip || "local-preview",
+      last_seen_ip: getStoredClientIp() || S.me.ip || "local-preview",
+      last_seen_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }]);
+    if(insertRes && insertRes.error){
+      if(!/duplicate|already exists/i.test(String(insertRes.error.message || ""))){
+        console.warn("Supabase profile insert failed:", insertRes.error);
+      }
+      return null;
+    }
+    return insertRes && insertRes.data ? insertRes.data[0] || insertRes.data : null;
+  }catch(err){
+    console.warn("Supabase profile ensure failed:", err);
+    return null;
+  }
+}
 async function hydrateSupabaseProfile(){
   if(!supabase||!S.supabaseSession||!S.supabaseSession.user){return null;}
   try{
@@ -1025,8 +1091,14 @@ async function hydrateSupabaseProfile(){
     }
     var row = res && res.data ? res.data : null;
     if(!row){
-      await syncSupabaseState();
-      return null;
+      await ensureSupabaseProfileForSession(S.supabaseSession, {
+        full_name: S.me.name,
+        email: S.me.email,
+        school: S.me.school,
+        track: S.me.track,
+        independent: !!S.me.independent
+      });
+      return await hydrateSupabaseProfile();
     }
     var remoteIp = row.last_seen_ip || row.ip_address || getStoredClientIp() || S.me.ip || "local-preview";
     S.me = Object.assign({}, S.me, {
@@ -1995,6 +2067,14 @@ document.addEventListener("submit",async function(e){
         team: null,
         email: signinEmail.trim().toLowerCase()
       };
+      await ensureSupabaseProfileForSession(session, {
+        full_name: S.me.name,
+        email: S.me.email,
+        school: S.me.school,
+        track: S.me.track,
+        independent: false
+      });
+      await hydrateSupabaseProfile();
       S.progress = makeEmptyProgress();
       S.viewLvl = {};
       S.checks = {};
@@ -2052,6 +2132,8 @@ document.addEventListener("submit",async function(e){
             session = signin.data && signin.data.session;
           }
           S.supabaseSession=session;
+          await ensureSupabaseProfileForSession(session, { full_name: name, email: String(email).trim().toLowerCase(), school: schoolId, track: t0, independent: isIndependent });
+          await hydrateSupabaseProfile();
         }catch(supabaseErr){
           if(isRateLimitError(supabaseErr && supabaseErr.message)){
             var demoUsers = getDemoUsers();
