@@ -445,7 +445,7 @@ var TROPHY='<svg class="trophy" viewBox="0 0 96 96" aria-hidden="true"><path d="
 
 var TRACKS = {
   prompt:  {name:"Prompt Engineering", short:"Prompting", color:"coral", lessons:5, project:"Study Helper",
-            brief:"Design a set of prompts that turns any textbook topic into a clear explanation and a ten-question quiz a junior student can follow."},
+            brief:"Design a set of prompts that turns any textbook topic into a clear explanation and a ten-question quiz a junior student can follow. Submit the prompt pack as a .txt document."},
   coding:  {name:"Intro to Coding", short:"Coding", color:"sky", lessons:6, project:"Browser Game",
             brief:"Write a number-guessing game or a quiz that runs in a phone browser and keeps score."},
   ai:      {name:"AI Development", short:"AI Dev", color:"violet", lessons:8, project:"School Problem App",
@@ -552,7 +552,9 @@ var ANSWERS=[
   {id:"a4",qid:"q3",student:"Emeka J.",school:"pio",text:"A variable is a number.",score:null,feedback:""},
   {id:"a5",qid:"q6",student:"Kemi L.",school:"riv",text:"Because people can see the front end code and steal the key and use it.",score:null,feedback:""}
 ];
+var WEEKLY_GOALS=[];
 var ADMIN_PIN="2580";
+var ADMIN_ACCOUNT={email:"admin@grey.local",password:"Admin123!",full_name:"Grey Admin",school:"independent",track:"prompt",is_admin:true};
 
 var LEVEL_NAMES=["Beginner","Intermediate","Advanced","Professional"];
 
@@ -569,6 +571,7 @@ function loadAdminData(){
     var raw=JSON.parse(localStorage.getItem(ADMIN_DATA_KEY)||"null");
     if(raw && Array.isArray(raw.students)) REGISTERED_STUDENTS = raw.students;
     if(raw && Array.isArray(raw.presentations)) PRESENTATIONS = raw.presentations;
+    if(raw && Array.isArray(raw.weeklyGoals)) WEEKLY_GOALS = raw.weeklyGoals;
     if(raw && typeof raw.apiKey === "string") APP_SETTINGS.apiKey = raw.apiKey;
   }catch(e){}
 }
@@ -577,14 +580,15 @@ function saveAdminData(){
     localStorage.setItem(ADMIN_DATA_KEY, JSON.stringify({
       apiKey: APP_SETTINGS.apiKey || "",
       students: REGISTERED_STUDENTS,
-      presentations: PRESENTATIONS
+      presentations: PRESENTATIONS,
+      weeklyGoals: WEEKLY_GOALS
     }));
   }catch(e){}
 }
 var PATHS={
   prompt:[
     {title:"Prompt Starter",project:"Study Helper",
-     brief:"Design a set of prompts that turns any textbook topic into a clear explanation and a ten-question quiz a junior student can follow.",
+     brief:"Design a set of prompts that turns any textbook topic into a clear explanation and a ten-question quiz a junior student can follow. Your submission should be a .txt prompt document.",
      skills:[{h:"Four parts",t:"Use role, task, context and format in every prompt."},{h:"Ask again",t:"Improve an answer by telling the AI what to change."},{h:"Use AI wisely",t:"Check facts and keep private details out."}]},
     {title:"Prompt Builder",project:"Prompt Pack",
      brief:"Write ten reusable prompt templates for one school subject or club, each with blanks to fill in and one worked example.",
@@ -974,7 +978,8 @@ function normaliseUserRecord(details){
   var name = details && details.full_name ? details.full_name : (details && details.name ? details.name : ((details && details.email) ? details.email.split("@")[0] : "Student"));
   var school = details && details.school ? details.school : "independent";
   var track = TRACKS[details && details.track] ? details.track : "prompt";
-  return {name:name,school:school,track:track,email:email,team:details && details.team ? details.team : null};
+  var isAdmin = !!(details && (details.is_admin || details.role === "admin" || details.role === "staff"));
+  return {name:name,school:school,track:track,email:email,team:details && details.team ? details.team : null,is_admin:isAdmin};
 }
 function getGlobalUsers(){
   try{return JSON.parse(localStorage.getItem(GLOBAL_USERS_KEY)||"[]");}catch(e){return [];} 
@@ -1100,6 +1105,7 @@ async function hydrateSupabaseProfile(){
       });
       return await hydrateSupabaseProfile();
     }
+    var isAdminEmail = String(S.me.email || row.email || "").trim().toLowerCase() === ADMIN_ACCOUNT.email.toLowerCase();
     var remoteIp = row.last_seen_ip || row.ip_address || getStoredClientIp() || S.me.ip || "local-preview";
     S.me = Object.assign({}, S.me, {
       name: row.full_name || S.me.name,
@@ -1107,9 +1113,11 @@ async function hydrateSupabaseProfile(){
       track: TRACKS[row.track] ? row.track : S.me.track,
       email: String(row.email || S.me.email || "").trim().toLowerCase(),
       team: S.me.team || null,
-      ip: remoteIp
+      ip: remoteIp,
+      is_admin: !!(row.is_admin || isAdminEmail)
     });
     S.learnTrack = S.me.track;
+    S.admin = !!S.me.is_admin || isAdminEmail;
     if(row.progress && typeof row.progress === "object"){
       TRACK_IDS.forEach(function(k){
         var p = row.progress[k];
@@ -1187,6 +1195,7 @@ function save(){
       questions:QUESTIONS,
       registeredStudents:REGISTERED_STUDENTS,
       presentations:PRESENTATIONS,
+      weeklyGoals:WEEKLY_GOALS,
       viewLvl:S.viewLvl,
       requested:S.requested,
       open:S.open,
@@ -1207,6 +1216,7 @@ function load(){
     loadAdminData();
     var d=JSON.parse(localStorage.getItem(STORE_KEY)||"null");
     if(!d||!d.me||!d.me.name||!TRACKS[d.me.track])return;
+    if(Array.isArray(d.weeklyGoals)) WEEKLY_GOALS = d.weeklyGoals;
     S.joined=!!d.joined;S.me=d.me;S.learnTrack=d.learnTrack || d.me.track;S.view=d.view || S.view;S.viewLvl=d.viewLvl || {};
     if(!find(TEAMS,S.me.team))S.me.team=null;
     TRACK_IDS.forEach(function(k){
@@ -1246,6 +1256,7 @@ async function applySignedInUser(details){
   var ip = await resolveClientIp();
   profile.ip = ip;
   profile.lastSeen = new Date().toISOString();
+  S.admin = !!profile.is_admin || String((details && details.email) || "").trim().toLowerCase() === ADMIN_ACCOUNT.email.toLowerCase();
   var stored = null;
   try{stored = JSON.parse(localStorage.getItem(STORE_KEY)||"null");}catch(e){}
   if(stored && stored.me && stored.me.name){
@@ -1278,8 +1289,9 @@ async function applySignedInUser(details){
       return;
     }
   }
-  S.me = {name:profile.name,school:profile.school,track:profile.track,team:null,email:profile.email,ip:ip};
+  S.me = {name:profile.name,school:profile.school,track:profile.track,team:null,email:profile.email,ip:ip,is_admin:!!profile.is_admin};
   S.learnTrack = profile.track;
+  S.admin = !!profile.is_admin || String(profile.email || "").trim().toLowerCase() === ADMIN_ACCOUNT.email.toLowerCase();
   S.progress = makeEmptyProgress();
   S.viewLvl = {};
   S.checks = {};
@@ -1306,6 +1318,13 @@ function resolveLocalDemoAuth(email,password){
     demoUsers.unshift(defaultDemo);
     saveDemoUsers(demoUsers);
   }
+  if(!demoUsers.some(function(u){return String(u.email || "").toLowerCase()===ADMIN_ACCOUNT.email.toLowerCase();})){
+    demoUsers.unshift({email:ADMIN_ACCOUNT.email,password:ADMIN_ACCOUNT.password,full_name:ADMIN_ACCOUNT.full_name,school:ADMIN_ACCOUNT.school,track:ADMIN_ACCOUNT.track,independent:true,is_admin:true});
+    saveDemoUsers(demoUsers);
+  }
+  if(normalized === ADMIN_ACCOUNT.email && passwordValue === ADMIN_ACCOUNT.password){
+    return { full_name: ADMIN_ACCOUNT.full_name, email: ADMIN_ACCOUNT.email, school: ADMIN_ACCOUNT.school, track: ADMIN_ACCOUNT.track, is_admin: true };
+  }
   var match = demoUsers.find(function(u){
     return String(u.email || "").toLowerCase() === normalized && String(u.password || "") === passwordValue;
   });
@@ -1313,7 +1332,8 @@ function resolveLocalDemoAuth(email,password){
     full_name: match.full_name || match.name || normalized.split("@")[0],
     email: match.email,
     school: match.school || "independent",
-    track: TRACKS[match.track] ? match.track : "prompt"
+    track: TRACKS[match.track] ? match.track : "prompt",
+    is_admin: !!match.is_admin
   } : null;
 }
 function isRateLimitError(msg){
@@ -1574,8 +1594,27 @@ function vQuiz(id){
     return '<section class="card"><label class="field" for="qa-'+q.id+'"><span style="font-size:15.500px">'+(i+1)+'. '+esc(q.text)+' <small>('+q.points+' points)</small></span><textarea id="qa-'+q.id+'" rows="3" maxlength="600" required placeholder="Write your answer in your own words"></textarea></label></section>';
   }).join("")+'<div><button class="btn" type="submit">Send my answers</button></div></form>';
 }
+function projectUploadSpec(trackId){
+  var key = String(trackId || "").toLowerCase();
+  if(key.indexOf("prompt")>-1 || key === "prompt"){
+    return {label:"Prompt doc", description:"Upload a plain text file for your prompt or research notes.", accept:".txt,text/plain", examples:".txt"};
+  }
+  if(key.indexOf("design")>-1 || key === "product-design" || key === "design"){
+    return {label:"Design file", description:"Upload a design board, concept document, or PDF prototype.", accept:".pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg", examples:"PDF, DOC, PPT, JPG"};
+  }
+  if(key.indexOf("market")>-1 || key === "research" || key === "market-research"){
+    return {label:"Research file", description:"Upload a market brief, report, or spreadsheet summary.", accept:".pdf,.csv,.xlsx,.doc,.docx,.txt", examples:"PDF, CSV, XLSX, DOC"};
+  }
+  if(key.indexOf("coding")>-1 || key === "coding"){
+    return {label:"Code bundle", description:"Upload a zip, HTML, or source-file bundle for your project.", accept:".zip,.html,.js,.css,.py,.json,.txt", examples:"ZIP, HTML, JS, Python"};
+  }
+  if(key.indexOf("ai")>-1 || key === "ai"){
+    return {label:"AI build file", description:"Upload a text report, prototype summary, or PDF for your AI project.", accept:".txt,.pdf,.md,.csv,.json", examples:"TXT, PDF, JSON, CSV"};
+  }
+  return {label:"Project file", description:"Upload a file that matches the task you are submitting.", accept:".pdf,.doc,.docx,.txt,.zip,.png,.jpg,.jpeg", examples:"PDF, DOC, TXT, ZIP, JPG"};
+}
 function vUpload(id){
-  var lv=viewLevel(id),head=panelHead("Upload your project · "+levelLabel(id)),mine=null;
+  var lv=viewLevel(id),head=panelHead("Upload your project · "+levelLabel(id)),mine=null,uploadSpec=projectUploadSpec(id);
   PROJECTS.forEach(function(p){if(p.mine&&p.track===id&&(p.level||0)===lv)mine=p;});
   if(mine){
     return head+'<section class="card stack" style="gap:10px"><span class="pill mint" style="align-self:flex-start">Uploaded</span><h3 style="font-size:20px;font-weight:800">'+esc(mine.title)+'</h3>'+
@@ -1593,7 +1632,7 @@ function vUpload(id){
     '<label class="field" for="up-solution">Solution <small>What did you make?</small><textarea id="up-solution" rows="2" maxlength="400" required></textarea></label>'+
     '<label class="field" for="up-built">How it was built <small>Tools, parts, prompts or code</small><textarea id="up-built" rows="2" maxlength="400" required></textarea></label>'+
     '<label class="field" for="up-demo">Demo link <small>Optional. A video or a live link</small><input id="up-demo" maxlength="200" autocomplete="off" placeholder="https://"></label>'+
-    '<label class="field" for="up-file">Project file <small>Optional. A photo, video, slides or code. This prototype keeps only the file name.</small><input id="up-file" type="file"></label>'+
+    '<label class="field" for="up-file">'+esc(uploadSpec.label)+' <small>'+esc(uploadSpec.description)+' Expected: '+esc(uploadSpec.examples)+'.</small><input id="up-file" type="file" accept="'+esc(uploadSpec.accept)+'" required></label>'+
     '<div><button class="btn" type="submit">Upload my project</button></div></form>';
 }
 function vLearn(){
@@ -1753,6 +1792,52 @@ function askAI(prompt){
     return {score:sc,feedback:String(out.feedback||"").slice(0,400)};
   });
 }
+function generateFromAI(prompt){
+  return serverAI(prompt).then(function(res){
+    var text = String(res && res.text || "");
+    var m = text.match(/\{[\s\S]*\}/);
+    if(!m) throw {code:"bad_reply"};
+    return JSON.parse(m[0]);
+  });
+}
+function generateWeeklyGoalAssets(goal){
+  if(!goal || !goal.goal || !goal.track){ return Promise.resolve({ presentation: { title: goal.title || "Weekly goal presentation", slides: [] }, questions: [] }); }
+  var prompt = [
+    "You are a secondary-school challenge coach.",
+    "Create a simple but motivating presentation and a short practice question set for students working towards this weekly goal.",
+    "Goal title: "+String(goal.title||"Weekly goal"),
+    "Goal description: "+String(goal.goal||""),
+    "Track: "+String(goal.track||"prompt"),
+    "School: "+String(goal.school||"independent"),
+    "Target audience: "+String(goal.audience||"students"),
+    "Output JSON only in this exact shape:",
+    "{",
+    "\"presentation\": {\"title\": \"string\", \"objective\": \"string\", \"slides\": [{\"heading\": \"string\", \"bullets\": [\"string\"], \"purpose\": \"string\"}]},",
+    "\"questions\": [{\"question\": \"string\", \"hint\": \"string\", \"success\": \"string\"}]",
+    "}",
+    "The presentation should feel achievable, practical and student-friendly.",
+    "Give 4 slides and 3 questions only."
+  ].join("\n");
+  return generateFromAI(prompt).catch(function(err){
+    return {
+      presentation: {
+        title: goal.title || "Weekly goal presentation",
+        objective: goal.goal || "Complete this challenge",
+        slides: [
+          {heading:"Goal", bullets:[goal.goal || "Build the target skill this week."], purpose:"Focus the team on the key outcome."},
+          {heading:"Plan", bullets:["Break the goal into clear tasks.","Check progress each day."], purpose:"Turn the goal into a workable path."},
+          {heading:"Evidence", bullets:["Show the work you made.","Explain why it helps the user."], purpose:"Prove the result is real."},
+          {heading:"Next step", bullets:["Refine the solution.","Review what you learned."], purpose:"Prepare for the next milestone."}
+        ]
+      },
+      questions: [
+        {question:"What is the first small step you will take to reach this goal?", hint:"Break the goal into a manageable action.", success:"A clear first action shows momentum."},
+        {question:"How will you know the solution is working?", hint:"Use a simple test or evidence point.", success:"The student can describe a measurable check."},
+        {question:"What did you learn from this week's attempt?", hint:"Reflect on what worked and what needs improvement.", success:"The reflection shows understanding and progress."}
+      ]
+    };
+  });
+}
 function gradeAnswer(a){
   var q=a&&find(QUESTIONS,a.qid);
   if(!q||S.busy[a.id])return Promise.resolve();
@@ -1821,7 +1906,7 @@ function vAdmin(){
   var tab=S.adminTab,body="";
   var needA=ANSWERS.filter(function(a){return a.score==null;}).length;
   var needP=PROJECTS.filter(function(p){return p.judge==null;}).length;
-  var tabs=[["answers","Answers"+(needA?" ("+needA+")":"")],["projects","Projects"+(needP?" ("+needP+")":"")],["questions","Questions"],["students","Students"],["presentations","Presentations"],["api","API key"]].map(function(t){
+  var tabs=[["answers","Answers"+(needA?" ("+needA+")":"")],["projects","Projects"+(needP?" ("+needP+")":"")],["questions","Questions"],["students","Students"],["goals","Weekly goals"],["presentations","Presentations"],["api","API key"]].map(function(t){
     return '<button class="chip" type="button" data-action="admin-tab" data-id="'+t[0]+'" aria-pressed="'+(tab===t[0])+'">'+t[1]+'</button>';
   }).join("");
   var notice=S.aiMsg?'<p class="notice">'+esc(S.aiMsg)+'</p>':"";
@@ -1855,6 +1940,20 @@ function vAdmin(){
       (REGISTERED_STUDENTS.length?REGISTERED_STUDENTS.map(function(student){
         return '<div class="row between" style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.08)"><div><b>'+esc(student.name)+'</b><div class="muted">'+esc(student.email)+' · '+esc(school(student.school).name)+'</div></div><span class="pill plain">'+esc(student.type || 'school')+'</span></div>';
       }).join(""):'<p class="muted">No student registrations yet.</p>')+'</section>';
+  }else if(tab==="goals"){
+    var goalsList = WEEKLY_GOALS.length ? WEEKLY_GOALS.map(function(goal){
+      var slides = Array.isArray(goal.presentation && goal.presentation.slides) ? goal.presentation.slides.map(function(s){return '<li><b>'+esc(s.heading)+'</b><ul>'+(Array.isArray(s.bullets)?s.bullets.map(function(b){return '<li>'+esc(b)+'</li>';}).join(""):'')+'</ul></li>';}).join("") : '';
+      var questions = Array.isArray(goal.questions) ? goal.questions.map(function(q){return '<li><b>'+esc(q.question)+'</b><div class="muted">'+esc(q.hint||'')+'</div></li>';}).join("") : '';
+      return '<section class="card stack" style="gap:8px"><div class="row between"><b>'+esc(goal.title || 'Weekly goal')+'</b><span class="pill plain">'+esc(goal.track || 'prompt')+'</span></div><p class="muted">'+esc(goal.goal || '')+'</p>' + (goal.presentation ? '<div><b>Presentation</b><p class="muted">'+esc(goal.presentation.objective || '')+'</p><ul>'+slides+'</ul></div>' : '') + (goal.questions ? '<div><b>Questions</b><ul>'+questions+'</ul></div>' : '') + '</section>';
+    }).join("") : '<p class="muted">No weekly goal has been uploaded yet.</p>';
+    body='<form id="goal-form" class="card stack" style="gap:12px"><span class="sec">Upload weekly goal</span>'+
+      '<div class="grid"><label class="field" for="goal-title">Goal title<input id="goal-title" required placeholder="Improve storytelling in our class pitch"></label>'+
+      '<label class="field" for="goal-track">Track<select id="goal-track">'+TRACK_IDS.map(function(k){return '<option value="'+k+'">'+esc(TRACKS[k].name)+'</option>';}).join("")+'</select></label></div>'+
+      '<div class="grid"><label class="field" for="goal-school">School<select id="goal-school">'+SCHOOLS.map(function(s){return '<option value="'+s.id+'">'+esc(s.name)+'</option>';}).join("")+'</select></label>'+
+      '<label class="field" for="goal-audience">Audience<input id="goal-audience" placeholder="Students, year 9 team, mentors"></label></div>'+
+      '<label class="field" for="goal-description">Weekly goal<textarea id="goal-description" rows="4" required placeholder="This week the students should improve how they explain the problem and demonstrate why their solution matters."></textarea></label>'+
+      '<div><button class="btn" type="submit">Generate presentation + questions</button></div></form>'+
+      '<section class="card stack"><div class="row between"><span class="sec">Generated outputs</span><span class="pill mint">'+WEEKLY_GOALS.length+'</span></div>'+goalsList+'</section>';
   }else if(tab==="presentations"){
     body='<form id="presentation-form" class="card stack" style="gap:12px"><span class="sec">Upload presentation</span>'+
       '<label class="field" for="presentation-title">Presentation title<input id="presentation-title" required placeholder="School Robotics Demo"></label>'+
@@ -1888,7 +1987,7 @@ function vAdmin(){
           '<b>'+esc(q.text)+'</b><p class="muted" style="font-size:14px">Good answer: '+esc(q.rubric)+'</p></section>';
       }).join("");
   }
-  return '<div class="view-head"><div class="row between"><h1>Admin</h1><button class="btn soft small" type="button" data-action="leave-admin">Leave admin</button></div><p>Set questions, grade answers, manage students, upload presentations, and keep the app key current.</p></div>'+
+  return '<div class="view-head"><div class="row between"><h1>Admin</h1><button class="btn soft small" type="button" data-action="leave-admin">Leave admin</button></div><p>Set questions, grade answers, manage students, upload weekly goals, generate a presentation, and keep the app key current.</p></div>'+
     '<div class="chips" role="group" aria-label="Admin sections">'+tabs+'</div><div class="stack" style="max-width:820px">'+body+'</div>';
 }
 
@@ -2198,9 +2297,21 @@ document.addEventListener("submit",async function(e){
     var fresh=ANSWERS.filter(function(x){return x.mine&&x.score==null;}),gi=0;
     (function next(){if(gi>=fresh.length||S.aiMsg)return;gradeAnswer(fresh[gi++]).then(next);})();
   }else if(fid==="upload-form"){
-    var team=find(TEAMS,S.me.team),f=document.getElementById("up-file").files[0];
+    var team=find(TEAMS,S.me.team),f=document.getElementById("up-file").files[0],allowed=projectUploadSpec(tk),fileName = f ? f.name : "";
+    if(!f){setAuthMessage("Please choose a file that matches this task.","error"); return;}
+    var allowedExts = (allowed.accept || "").split(",").map(function(x){return x.trim().toLowerCase();}).filter(Boolean);
+    var ext = fileName.toLowerCase().split(".").pop();
+    var matches = allowedExts.some(function(value){
+      if(value.indexOf("/")>-1) return false;
+      if(value.indexOf(".")===0) return fileName.toLowerCase().endsWith(value.toLowerCase());
+      return value === ext || fileName.toLowerCase().endsWith("."+value);
+    });
+    if(!matches){
+      setAuthMessage("This file type does not match the task. Use: "+allowed.examples+" for this project.","error");
+      return;
+    }
     PROJECTS.push({id:"u"+Date.now(),title:val("up-title"),team:team?team.name:S.me.name,school:S.me.school,track:tk,level:viewLevel(tk),judge:null,votes:0,
-      problem:val("up-problem"),solution:val("up-solution"),built:val("up-built"),demo:val("up-demo"),file:f?f.name:"",feedback:"",mine:true});
+      problem:val("up-problem"),solution:val("up-solution"),built:val("up-built"),demo:val("up-demo"),file:fileName,feedback:"",mine:true});
     setProgress(tk,4);
     render();
   }else if(fid==="admin-form"){
